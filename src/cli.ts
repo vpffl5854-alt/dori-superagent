@@ -179,7 +179,12 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
       if (x === "status") {
         const stop = d.store.stop();
         const last = d.store.lastRun();
-        console.log(stop ? `stopped: ${stop.reason}` : "running (no stop file)");
+        const age = last ? Math.round((d.now() - last.at) / 60_000) : undefined;
+        console.log(
+          stop
+            ? `stopped: ${stop.reason}`
+            : `armed (no stop file; ${age === undefined ? "no run recorded yet" : `last run ${age}m ago`})`,
+        );
         console.log(last ? summary(last) : "no run yet");
         return 0;
       }
