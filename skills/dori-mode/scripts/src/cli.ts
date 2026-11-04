@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -24,6 +25,8 @@ import { envInt, fileTgInboundStore, telegramInboundLoop } from "./messenger/tel
 import { ThreadLedger } from "./messenger/thread-ledger.ts";
 import { slackPresence } from "./messenger/slack-presence.ts";
 import { Telegram } from "./messenger/telegram.ts";
+import { DiscordInbound, formatInbound, type ChannelGuild, type ChannelHistory, type CursorStore, type GatewaySocket, type Inbound } from "./messenger/discord-inbound.ts";
+import { withBackoff } from "./messenger/http.ts";
 import { Discord, discordPresence } from "./messenger/discord.ts";
 import { realTimers } from "./messenger/typing.ts";
 import { transcribe, TranscriptionError } from "./messenger/voice.ts";
@@ -69,7 +72,8 @@ const USAGE = `dori <command> [options]
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file>              run hooks.transcribe and print the text
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
-                                       the Dori posted in (any helper), DMs and channels with unread mentions`;
+                                       the Dori posted in (any helper), DMs and channels with unread mentions
+  inbound discord                      print INBOUND lines from the Discord gateway (needs MESSAGE CONTENT intent)`;
 
 const die = (message: string, code = 1): never => {
   console.error(message);
@@ -120,6 +124,102 @@ const lane = async (k: string | undefined) => {
   if (!found) return die(k ? `no registered lane "${k}"` : "no open lane is registered for this pane");
   if (statusOf(found) === "closed") return die(`lane ${found.key} is already closed`);
   return found;
+};
+
+const discordWhoAmI = async (token: string): Promise<string> => {
+  const res = await fetchHttp({ method: "GET", url: "https://discord.com/api/v10/users/@me", headers: { Authorization: `Bot ${token}` } });
+  if (res.status >= 300) die(`discord /users/@me failed: ${res.status} ${res.body.slice(0, 120)}`);
+  const id = (JSON.parse(res.body) as { id?: string }).id;
+  if (!id) return die("discord /users/@me returned no id");
+  return id;
+};
+
+/** Per-channel cursors, written through a temp file so a crash mid-write cannot leave a truncated JSON. */
+const inboundCursors = (stateDir: string): CursorStore => {
+  const path = `${stateDir}/discord-inbound-cursors.json`;
+  const read = async (): Promise<Record<string, string>> => {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const cursors: Record<string, string> = {};
+      for (const [channel, id] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof id === "string" && id) cursors[channel] = id;
+      }
+      return cursors;
+    } catch {
+      return {};
+    }
+  };
+  return {
+    read,
+    write: async (cursors) => {
+      const tmp = `${path}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(cursors, null, 2)}\n`);
+      renameSync(tmp, path);
+    },
+  };
+};
+
+/** Discord REST history for one channel; a channel the bot cannot read is empty, not fatal. */
+const channelHistory = (token: string): ChannelHistory => async (channel, after, limit) => {
+  const url = `https://discord.com/api/v10/channels/${channel}/messages?after=${after}&limit=${limit}`;
+  const res = await withBackoff(fetchHttp, realClock, { method: "GET", url, headers: { Authorization: `Bot ${token}` } }, undefined, (body) => {
+    try {
+      const parsed = JSON.parse(body) as { retry_after?: unknown };
+      return typeof parsed.retry_after === "number" ? parsed.retry_after : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  if (res.status === 403 || res.status === 404) return [];
+  if (res.status >= 300) throw new Error(`GET ${channel} messages -> ${res.status} ${res.body.slice(0, 120)}`);
+  const parsed = JSON.parse(res.body) as unknown;
+  return Array.isArray(parsed) ? parsed : [];
+};
+
+const channelGuild = (token: string): ChannelGuild => async (channel) => {
+  const res = await fetchHttp({ method: "GET", url: `https://discord.com/api/v10/channels/${channel}`, headers: { Authorization: `Bot ${token}` } });
+  if (res.status >= 300) throw new Error(`GET ${channel} -> ${res.status} ${res.body.slice(0, 120)}`);
+  const parsed = JSON.parse(res.body) as { guild_id?: unknown };
+  return typeof parsed.guild_id === "string" ? parsed.guild_id : null;
+};
+
+const openGatewaySocket = (): GatewaySocket => {
+  const ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
+  let handler: (d: string) => void = () => {};
+  ws.addEventListener("message", (e) => handler(String(e.data)));
+  return { send: (d) => ws.send(d), close: () => ws.close(), onMessage: (cb) => { handler = cb; } };
+};
+
+const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
+const EXT_BY_TYPE: Readonly<Record<string, string>> = {
+  "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/avif": "avif",
+  "video/mp4": "mp4", "video/webm": "webm",
+};
+
+/** Saves what a Discord message carries under <stateDir>/discord-media/ so a lane can open the image itself. */
+const mediaStore = (stateDir: string): { save: (messageId: string, index: number, ref: { url: string; name: string }) => Promise<readonly string[]> } => {
+  const dir = `${stateDir}/discord-media`;
+  return {
+    save: async (messageId, index, ref) => {
+      const res = await fetch(ref.url);
+      if (!res.ok) throw new Error(`GET ${ref.url} -> ${res.status}`);
+      const declared = Number(res.headers.get("content-length") ?? "0");
+      if (declared > MAX_MEDIA_BYTES) throw new Error(`${ref.url} is ${declared} bytes, past the ${MAX_MEDIA_BYTES} limit`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > MAX_MEDIA_BYTES) throw new Error(`${ref.url} is ${bytes.byteLength} bytes, past the ${MAX_MEDIA_BYTES} limit`);
+      const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+      const ext = EXT_BY_TYPE[type] ?? ref.name.split(".").pop()?.toLowerCase().slice(0, 8) ?? "bin";
+      mkdirSync(dir, { recursive: true });
+      const base = `${dir}/${messageId}-${index}`;
+      const path = `${base}.${ext}`;
+      writeFileSync(path, bytes);
+      if (!type.startsWith("video/")) return [path];
+      const frame = `${base}.png`;
+      const ff = await run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", path, "-frames:v", "1", frame], { timeoutMs: 20_000 });
+      return ff.code === 0 && existsSync(frame) ? [frame, path] : [path];
+    },
+  };
 };
 
 const every = async (minutes: number, tick: () => Promise<void>): Promise<void> => {
@@ -418,7 +518,27 @@ try {
         );
         break;
       }
-      if (key !== "slack") die("inbound supports slack or telegram");
+      if (key === "discord") {
+        const dcToken = process.env.DORI_DISCORD_TOKEN ?? die("DORI_DISCORD_TOKEN is not set");
+        const me = await discordWhoAmI(dcToken);
+        const inbound = new DiscordInbound(
+          () => openGatewaySocket(),
+          dcToken,
+          realTimers,
+          me,
+          (i: Inbound) => console.log(formatInbound(i)),
+          (line) => console.error(`[${new Date().toISOString().replace(/\.\d+Z$/, "Z")}] discord gateway: ${line}`),
+          mediaStore(config.stateDir),
+          inboundCursors(config.stateDir),
+          channelHistory(dcToken),
+          channelGuild(dcToken),
+        );
+        inbound.start();
+        console.log("INBOUND_READY discord");
+        await new Promise(() => {});
+        break;
+      }
+      if (key !== "slack") die("inbound supports slack, telegram or discord");
       const auth = { token: process.env.DORI_SLACK_TOKEN ?? die("DORI_SLACK_TOKEN is not set"), cookie: process.env.DORI_SLACK_COOKIE };
       const ledger = new ThreadLedger(`${config.stateDir}/slack-threads.json`);
       const slack = new Slack(fetchHttp, realClock, auth, undefined, ledger);
