@@ -8,7 +8,7 @@ import {
   type GatewaySocket,
   type Inbound,
   type InboundCursors,
-} from "../skills/dori-mode/scripts/src/messenger/discord-inbound.ts";
+} from "../src/messenger/discord-inbound.ts";
 
 const inertClock: Clock = { setInterval: () => 1, clearInterval: () => {} };
 

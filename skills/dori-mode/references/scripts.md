@@ -54,6 +54,7 @@ The CLI is a thin layer over typed modules you can import in your own scripts:
 | `src/messenger/thread-ledger.ts` | `ThreadLedger`: every thread the Dori posts in, persisted; given to `Slack`, it records each `chat.postMessage` (also raw `call`s) |
 | `src/messenger/slack-inbound.ts` | `pollSlackInbound`: threads view, the ledger's threads and unread counts, deduplicated, own messages filtered |
 | `src/messenger/telegram-inbound.ts` | `pollTelegramInbound`: owner-gated `getUpdates` long-poll, persisted offset, DMs and the group gate |
+| `src/messenger/discord-inbound.ts` | `DiscordInbound`: gateway socket with heartbeat and reconnect, per-channel cursors, REST backfill, media refs |
 | `src/messenger/slack-presence.ts` | `slackPresence`: hold a user account active |
 | `src/routing.ts` | `canLaunch`, `idleLaneFor`: the routing checks |
 
@@ -175,6 +176,19 @@ Prints `INBOUND <source> <chat> <thread> <update-id> <from> <text>[ file=<kind>:
 - edits arrive too: `edited_message` updates are polled and printed as their own `edit` kind, carrying the edited text;
 - env ids are validated at start — `DORI_TELEGRAM_OWNER_ID`, `DORI_TELEGRAM_GROUP_ID` and `DORI_TELEGRAM_TOPIC_ID` must match `/^-?\d+$/` after trimming; empty, whitespace-only, `1e3` and `0x10` are refused with an error naming the variable;
 - reuses the bot token the skill already stores (`DORI_TELEGRAM_TOKEN`).
+
+### `dori inbound discord`
+Prints `INBOUND discord <source> <channel> <guild> <message-id> <author> <text>`, keeping the same field order as Slack: `source` is `guild` or `dm`, `guild` is the guild id or `-` for a DM, and `text` is JSON-escaped on one line. A message with images or videos appends `media=<path>,...`, and a reply appends `reply_to=<id>` with `reply_author=` and `reply_text=` when Discord sent the referenced message. The bot's own messages are skipped; messages from other bots are delivered like anyone else's. It holds a gateway socket (`wss://gateway.discord.gg/?v=10&encoding=json`) open and prints `INBOUND_READY discord` once the socket and backfill have started:
+- the token comes from `DORI_DISCORD_TOKEN`, the same variable `dori send discord` reads; the bot id is fetched from `/users/@me` so its own messages can be filtered;
+- `MESSAGE_CONTENT` is a **privileged intent**: without it a guild message's `content` arrives empty, so a text-only message is dropped and one with attachments shows only `[N attachment(s)]` (DMs are not gated). Enable it in the Developer Portal under Bot -> Privileged Gateway Intents; the receiver asks for `GUILD_MESSAGES`, `DIRECT_MESSAGES` and `MESSAGE_CONTENT`, and Discord closes a connection that asks for an intent the bot was not granted;
+- a restart asks Discord for what it missed: `<stateDir>/discord-inbound-cursors.json` holds one cursor per channel (written through a temp file), and each stored channel's REST history is paged from its cursor forward, up to 2,000 messages (20 pages of 100), after which the run says it stopped at the page limit;
+- the cursor for a channel means "everything up to this id is handled", so the bot's own messages and anything filtered still move it forward and are not fetched again;
+- a backfilled message's guild is looked up once per channel (`GET /channels/<id>`), since REST message payloads carry no `guild_id` and a backfilled message would otherwise print as a DM; text longer than 1,500 characters is cut on the line;
+- images and videos are downloaded to `<stateDir>/discord-media/` (10 MB cap; when `ffmpeg` is installed, a video also gets a frame at 0.5 s) and their paths ride on the line;
+- a channel the bot cannot read (403/404) is skipped rather than fatal, and a failed history call stops that channel's backfill and prints the reason on `stderr`;
+- a message is reported once per id within a run (the last 500 ids are kept); across a restart the per-channel cursor is the dedupe base, so anything the cursor has not passed can be printed again;
+- the socket reconnects itself when Discord asks for it (`op 7`), the session is invalidated (`op 9`), or a heartbeat ack is missed;
+- delivery is at-least-once for text: a message's line is printed in the same step that moves its channel cursor in memory, and the cursor file write is queued and lands after that line, so a crash between the line and the write replays the message from history on restart — the duplicate carries the same message id. A message with media is the exception: its line waits for the downloads while the queued cursor write can already have landed, so a crash in that window leaves the cursor past a message that never printed;
 
 ### `dori transcribe <audio-file>`
 Runs `hooks.transcribe` and prints the transcript. A failed or empty transcription is an error, never an empty message.

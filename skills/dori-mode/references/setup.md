@@ -70,6 +70,7 @@ Arm these as persistent monitors in your own session:
 | freshness | `dori freshness --loop 5` | `^(NUDGED\|POSTED\|NO-REPORT\|PENDING-REPORT\|STALE-REPORT\|STALLED\|JOURNAL-ERROR\|WORKING-WHILE-PAUSED)` |
 | Slack inbound (Slack only) | `dori inbound slack --loop 1` | `^INBOUND` |
 | Telegram inbound (Telegram only) | `DORI_TELEGRAM_TOKEN=… DORI_TELEGRAM_OWNER_ID=… dori inbound telegram --loop 1` | `^INBOUND` |
+| Discord inbound | `dori inbound discord` | `^INBOUND` |
 | presence (optional) | `dori presence slack` or `dori presence discord` | `^PRESENCE_READY` |
 
 ## 6. First look around
