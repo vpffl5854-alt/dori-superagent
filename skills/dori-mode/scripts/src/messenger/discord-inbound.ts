@@ -176,11 +176,12 @@ export const toInbound = (data: unknown, selfId: string, guildHint?: string | nu
   };
 };
 
-const MAX_INBOUND_TEXT = 1500;
 const REPLY_PREVIEW = 300;
 
+/** The message text is not cut: Discord caps it at 2,000 characters, JSON escaping keeps it on one
+ * line, and a reader that only sees a prefix cannot tell what was removed. */
 export const formatInbound = (i: Inbound): string =>
-  `INBOUND discord ${i.source} ${i.channel} ${i.guild} ${i.messageId} ${i.author} ${JSON.stringify(i.text.slice(0, MAX_INBOUND_TEXT))}` +
+  `INBOUND discord ${i.source} ${i.channel} ${i.guild} ${i.messageId} ${i.author} ${JSON.stringify(i.text)}` +
   (i.media && i.media.length > 0 ? ` media=${i.media.join(",")}` : "") +
   (i.replyToId
     ? ` reply_to=${i.replyToId}${i.replyToAuthor ? ` reply_author=${JSON.stringify(i.replyToAuthor)}` : ""}${
@@ -197,6 +198,9 @@ export class DiscordInbound {
   private stopped = false;
   private readonly seen = new Set<string>();
   private chain: Promise<void> = Promise.resolve();
+  /** Media lines are printed here, one message at a time, so a cursor never passes a line that has
+   * not been printed yet. */
+  private printChain: Promise<void> = Promise.resolve();
   private cursorMap: Record<string, string> = {};
   private cursorWrite: Promise<void> = Promise.resolve();
 
@@ -224,9 +228,10 @@ export class DiscordInbound {
   async idle(): Promise<void> {
     for (;;) {
       const chain = this.chain;
+      const print = this.printChain;
       const write = this.cursorWrite;
-      await Promise.all([chain, write]);
-      if (chain === this.chain && write === this.cursorWrite) return;
+      await Promise.all([chain, print, write]);
+      if (chain === this.chain && print === this.printChain && write === this.cursorWrite) return;
     }
   }
 
@@ -306,7 +311,6 @@ export class DiscordInbound {
       const oldest = this.seen.values().next().value;
       if (oldest !== undefined) this.seen.delete(oldest);
     }
-    this.noteCursor(inbound.channel, inbound.messageId);
     this.deliver(inbound, mediaRefs(data));
     return true;
   }
@@ -367,6 +371,8 @@ export class DiscordInbound {
         cursor = newerId(cursor, idOf(row));
         if (this.report(row, guild)) delivered++;
       }
+      // A page's media lines may still be printing; the cursor must not pass them before they are out.
+      await this.printChain;
       // The cursor means "everything up to here is handled", including the bot's own messages and
       // anything this run filtered, so the next restart does not fetch them again.
       this.noteCursor(channel, cursor);
@@ -401,10 +407,15 @@ export class DiscordInbound {
   private deliver(inbound: Inbound, refs: readonly MediaRef[]): void {
     const store = this.store;
     if (!store || refs.length === 0) {
+      // Text prints synchronously, so moving the cursor here is print-then-write: a crash between the
+      // two replays the message (same id) instead of losing it.
+      this.noteCursor(inbound.channel, inbound.messageId);
       this.onInbound(inbound);
       return;
     }
-    this.chain = this.chain
+    // A media line waits on its downloads. The cursor moves only after that line is out, so a crash
+    // cannot leave the cursor past a message that never printed.
+    this.printChain = this.printChain
       .then(async () => {
         const media: string[] = [];
         for (const [index, ref] of refs.entries()) {
@@ -415,6 +426,7 @@ export class DiscordInbound {
           }
         }
         this.onInbound(media.length > 0 ? { ...inbound, media } : inbound);
+        this.noteCursor(inbound.channel, inbound.messageId);
       })
       .catch((e) => this.onEvent(`media queue failed: ${(e as Error).message}`));
   }
