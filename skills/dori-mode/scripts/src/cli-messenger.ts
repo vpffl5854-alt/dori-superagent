@@ -1,5 +1,19 @@
 /** dori send, presence, inbound and transcribe: the messengers. */
 import { type Command, die, envSlackToken, every, slackAuth } from "./cli-context.ts";
+import type { DoriConfig } from "./config.ts";
+import { formatInbound } from "./messenger/discord-inbound.ts";
+import { DiscordInbound } from "./messenger/discord-inbound.ts";
+import { startDiscordReplies, sessionPathFor } from "./messenger/discord-answers.ts";
+import {
+  channelGuild,
+  channelHistory,
+  discordToken,
+  discordWhoAmI,
+  inboundCursors,
+  mediaStore,
+  openGatewaySocket,
+  surviveCrashes,
+} from "./messenger/discord-wiring.ts";
 import { Discord, discordPresence } from "./messenger/discord.ts";
 import { fetchHttp, MessengerError, UnsafeMessageError } from "./messenger/http.ts";
 import { Slack } from "./messenger/slack.ts";
@@ -53,7 +67,7 @@ const send: Command = async ({ key, need, opt, values, config }) => {
     if (messageId !== undefined) await tg.edit(target, messageId, text);
     else console.log(`SENT ${await tg.send(target, text)}`);
   } else if (platform === "discord") {
-    const dc = new Discord(fetchHttp, realClock, token("DORI_DISCORD_TOKEN"));
+    const dc = new Discord(fetchHttp, realClock, discordToken());
     if (edit) await dc.edit(to, edit, text);
     else console.log(`SENT ${await dc.send(thread ?? to, text)}`);
   } else die(`unknown platform ${platform}`);
@@ -79,7 +93,7 @@ const presence: Command = async ({ key }) => {
     console.log("PRESENCE_READY slack");
     await every(1, async () => console.log(`PRESENCE slack ${await p.hold()}`));
   } else if (key === "discord") {
-    const token = process.env["DORI_DISCORD_TOKEN"] ?? die("DORI_DISCORD_TOKEN is not set");
+    const token = discordToken();
     discordPresence(
       () => {
         const ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
@@ -133,10 +147,40 @@ const telegramInbound = async (stateDir: string, minutes: number): Promise<void>
   );
 };
 
+const discordInbound = async (config: DoriConfig): Promise<void> => {
+  const stateDir = config.stateDir;
+  const dcToken = discordToken();
+  const me = await discordWhoAmI(dcToken);
+  surviveCrashes("discord inbound");
+  const replies = startDiscordReplies(new Discord(fetchHttp, realClock, dcToken), stateDir, config);
+  const inbound = new DiscordInbound(
+    () => openGatewaySocket(),
+    dcToken,
+    realTimers,
+    me,
+    (i) => {
+      console.log(formatInbound(i));
+      void sessionPathFor(config.sessionsDir, config.defaultCwd).then((sessionPath) => {
+        if (sessionPath) void replies.enqueue({ channel: i.channel, messageId: i.messageId, sessionPath });
+      });
+    },
+    (line) => console.error(`[${new Date().toISOString().replace(/\.\d+Z$/, "Z")}] discord gateway: ${line}`),
+    mediaStore(stateDir),
+    inboundCursors(stateDir),
+    channelHistory(dcToken),
+    channelGuild(dcToken),
+  );
+  inbound.start();
+  console.log("INBOUND_READY discord");
+  await new Promise(() => {});
+  replies.stop();
+};
+
 const inbound: Command = async ({ key, loopMinutes, config }) => {
   const minutes = loopMinutes();
   if (key === "telegram") return await telegramInbound(config.stateDir, minutes);
-  if (key !== "slack") die("inbound supports slack or telegram");
+  if (key === "discord") return await discordInbound(config);
+  if (key !== "slack") die("inbound supports slack, telegram or discord");
   const auth = slackAuth(envSlackToken() ?? die(NO_SLACK_TOKEN));
   const ledger = new ThreadLedger(`${config.stateDir}/slack-threads.json`);
   const slack = new Slack(fetchHttp, realClock, auth, undefined, ledger);

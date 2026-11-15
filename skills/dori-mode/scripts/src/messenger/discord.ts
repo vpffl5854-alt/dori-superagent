@@ -18,7 +18,11 @@ export class Discord {
     private readonly base = "https://discord.com/api/v10",
   ) {}
 
-  async call<T = unknown>(method: "GET" | "POST" | "PATCH", path: string, body?: Record<string, unknown>): Promise<T> {
+  async call<T = unknown>(
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<T> {
     const res = await withBackoff(
       this.http,
       this.clock,
@@ -36,11 +40,12 @@ export class Discord {
     return (res.body ? JSON.parse(res.body) : {}) as T;
   }
 
-  async send(channelId: string, content: string): Promise<string> {
+  async send(channelId: string, content: string, replyTo?: string): Promise<string> {
     return (
       await this.call<{ id: string }>("POST", `/channels/${channelId}/messages`, {
         content: guardText(content),
         allowed_mentions: { parse: [] },
+        ...(replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}),
       })
     ).id;
   }
@@ -51,6 +56,29 @@ export class Discord {
 
   async typing(channelId: string): Promise<void> {
     await this.call("POST", `/channels/${channelId}/typing`);
+  }
+
+  /**
+   * Adds a reaction. `emoji` is either a unicode character or `name:id` for a custom
+   * emoji; the two forms go in different fields, so the shape of the string decides.
+   * Discord percent-encodes the emoji in the path — a bare character sent raw is
+   * rejected with 400 on some clients.
+   */
+  async react(channelId: string, messageId: string, emoji: string): Promise<void> {
+    const raw = emoji.trim();
+    if (!raw) throw new MessengerError("discord react: empty emoji", 400);
+    const custom = /^[a-zA-Z0-9_]+:\d{5,}$/.test(raw);
+    const enc = custom ? raw : encodeURIComponent(raw);
+    await this.call("PUT", `/channels/${channelId}/messages/${messageId}/reactions/${enc}/@me`);
+  }
+
+  /** Removes the bot's own reaction, which is how a read receipt gets cleared. */
+  async unreact(channelId: string, messageId: string, emoji: string): Promise<void> {
+    const raw = emoji.trim();
+    if (!raw) throw new MessengerError("discord unreact: empty emoji", 400);
+    const custom = /^[a-zA-Z0-9_]+:\d{5,}$/.test(raw);
+    const enc = custom ? raw : encodeURIComponent(raw);
+    await this.call("DELETE", `/channels/${channelId}/messages/${messageId}/reactions/${enc}/@me`);
   }
 
   async startThread(channelId: string, messageId: string, name: string): Promise<string> {
