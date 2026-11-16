@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!**/fixtures", "!**/*.md", "!docs/**/*.svg"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noFallthroughSwitchClause": "off" // tsc noFallthroughCasesInSwitch covers this with type knowledge (process.exit returns never)
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error"
+      },
+      "style": {
+        "useImportType": "error",
+        "noNonNullAssertion": "off" // `!` follows noUncheckedIndexedAccess guards the code has already checked
+      },
+      "complexity": {
+        "noForEach": "off", // the code base uses forEach for side-effect loops in a few places; for-of rewrites add churn and no safety
+        "useLiteralKeys": "off" // conflicts with tsc noPropertyAccessFromIndexSignature, which requires obj["key"] for index signatures
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "assist": {
+    "enabled": false
+  }
+}

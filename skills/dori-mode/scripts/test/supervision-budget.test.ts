@@ -1,0 +1,210 @@
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Lane } from "../src/registry.ts";
+import { Reports } from "../src/reports.ts";
+import type { Runner } from "../src/run.ts";
+import { Supervision } from "../src/supervision.ts";
+import { type SupervisionOptions, workingTimer } from "../src/supervision-observe.ts";
+import { fakeClock, withState } from "./fakes.ts";
+
+const start = Date.parse("2026-10-29T00:00:00Z");
+
+const lane: Lane = {
+  key: "demo-lane",
+  title: "Demo",
+  thread: "",
+  brief: "",
+  done: "",
+  openedAt: new Date(start).toISOString(),
+  reportProtocol: "jsonl-v1",
+};
+
+const fixture = (options: SupervisionOptions = {}) => {
+  const state = withState();
+  const clock = fakeClock(start);
+  const calls: string[][] = [];
+  const alerts: string[] = [];
+  let usage = '{"tokens":null,"costUsd":null}';
+  let dirty = "";
+  const run: Runner = async (argv) => {
+    calls.push([...argv]);
+    return { code: 0, out: argv[0] === "usage" ? usage : argv[0] === "git" ? dirty : "", err: "" };
+  };
+  const deps = {
+    stateDir: state.dir,
+    clock,
+    run,
+    alert: (_lane: Lane, message: string) => {
+      alerts.push(message);
+    },
+  };
+  return {
+    ...state,
+    clock,
+    calls,
+    alerts,
+    deps,
+    supervisor: new Supervision(deps, options),
+    setUsage: (value: string) => {
+      usage = value;
+    },
+    setDirty: (value: string) => {
+      dirty = value;
+    },
+  };
+};
+
+describe("supervision", () => {
+  test("budgets block without killing, support per-lane overrides and deduplicate alerts", async () => {
+    const f = fixture({
+      usageArgv: ["usage", "{key}"],
+      defaults: { wallMinutes: 100, tokens: 1000, costUsd: 10 },
+      lanes: { "demo-lane": { wallMinutes: 1, tokens: 10, costUsd: 1 } },
+    });
+    try {
+      f.setUsage('{"tokens":10,"costUsd":1}');
+      f.clock.at += 60_000;
+      const result = await f.supervisor.sweep(lane, "Working 1m");
+      expect(result.state).toBe("blocked");
+      expect(result.usage).toEqual({ key: lane.key, at: new Date(f.clock.at).toISOString(), tokens: 10, costUsd: 1 });
+      expect(result.alerts).toEqual([
+        "wallMinutes ceiling reached (1)",
+        "tokens ceiling reached (10)",
+        "costUsd ceiling reached (1)",
+      ]);
+      f.setUsage('{"tokens":11,"costUsd":2}');
+      f.clock.at += 60_000;
+      expect((await f.supervisor.sweep(lane, "Working 2m")).alerts).toEqual([]);
+      expect(f.calls).toEqual([
+        ["usage", lane.key],
+        ["usage", lane.key],
+      ]);
+      expect(new Reports(f.dir).read(lane.key)?.lastReport?.kind).toBe("blocker");
+    } finally {
+      f.done();
+    }
+  });
+
+  test("a ceiling reached while the lane waits on a question still appends a durable blocker", async () => {
+    const f = fixture({ defaults: { wallMinutes: 1 } });
+    try {
+      const reports = new Reports(f.dir);
+      reports.report(lane.key, "question", "which branch?", f.clock.now());
+      f.clock.at += 60_000;
+      expect((await f.supervisor.sweep(lane, "")).alerts).toEqual(["wallMinutes ceiling reached (1)"]);
+      expect(reports.read(lane.key)?.lastReport).toMatchObject({
+        kind: "blocker",
+        text: "wallMinutes ceiling reached (1)",
+      });
+      f.clock.at += 60_000;
+      await f.supervisor.sweep(lane, "");
+      expect(readFileSync(reports.path(lane.key), "utf8").trim().split("\n")).toHaveLength(2);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("an alert whose delivery failed is sent again on the next sweep, and a delivered one is not", async () => {
+    const f = fixture({ defaults: { wallMinutes: 1 } });
+    try {
+      const sent: string[] = [];
+      let failing = true;
+      const supervisor = new Supervision(
+        {
+          ...f.deps,
+          alert: (_lane: Lane, message: string) => {
+            if (failing) throw new Error("messenger down");
+            sent.push(message);
+          },
+        },
+        f.supervisor.options,
+      );
+      f.clock.at += 60_000;
+      await expect(supervisor.sweep(lane, "")).rejects.toThrow("messenger down");
+      failing = false;
+      f.clock.at += 60_000;
+      expect((await supervisor.sweep(lane, "")).alerts).toEqual(["wallMinutes ceiling reached (1)"]);
+      f.clock.at += 60_000;
+      expect((await supervisor.sweep(lane, "")).alerts).toEqual([]);
+      expect(sent).toEqual(["wallMinutes ceiling reached (1)"]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("lane budgets override defaults and unknown usage stays null in persisted close snapshot", async () => {
+    const f = fixture({
+      usageArgv: ["usage"],
+      recordCostArgv: ["record", "{key}", "{tokens}", "{costUsd}"],
+      defaults: { wallMinutes: 0, tokens: 0, costUsd: 0 },
+    });
+    try {
+      f.setUsage('{"tokens":-1,"costUsd":"not-known"}');
+      const result = await f.supervisor.sweep({ ...lane, budget: { wallMinutes: null } }, "Working 1m");
+      expect(result.state).toBe("running");
+      expect(result.usage?.tokens).toBeNull();
+      expect(result.usage?.costUsd).toBeNull();
+      expect(result.alerts).toHaveLength(2);
+      f.setUsage("malformed");
+      const snapshot = await f.supervisor.close(lane);
+      expect(snapshot?.tokens).toBeNull();
+      expect(f.calls.some((args) => args[0] === "record")).toBe(false);
+      const stored = readFileSync(join(f.dir, "lanes", lane.key, "cost.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(stored.at(-1)).toEqual(snapshot);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("available cumulative usage reaches the optional close recording hook", async () => {
+    const f = fixture({ usageArgv: ["usage"], recordCostArgv: ["record", "{key}", "{tokens}", "{costUsd}"] });
+    try {
+      f.setUsage('{"tokens":1234,"costUsd":0.25}');
+      const snapshot = await f.supervisor.close(lane);
+      expect(snapshot?.tokens).toBe(1234);
+      expect(f.calls.at(-1)).toEqual(["record", lane.key, "1234", "0.25"]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("a second close keeps the first final reading and runs the cost hook once, with a stable close key", async () => {
+    const f = fixture({ usageArgv: ["usage"], recordCostArgv: ["record", "{closeKey}", "{tokens}"] });
+    try {
+      f.setUsage('{"tokens":1234,"costUsd":0.25}');
+      const first = await f.supervisor.close(lane);
+      f.setUsage('{"tokens":9999,"costUsd":9}');
+      f.clock.at += 60_000;
+      expect(await new Supervision(f.deps, f.supervisor.options).close(lane)).toEqual(first);
+      expect(f.calls.filter((args) => args[0] === "record")).toEqual([
+        ["record", `${lane.key}@${lane.openedAt}`, "1234"],
+      ]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("terminal progress is not overwritten by budget or hung reports", async () => {
+    const f = fixture({ defaults: { wallMinutes: 0 } });
+    try {
+      new Reports(f.dir).report(lane.key, "done", "finished", f.clock.now());
+      expect((await f.supervisor.sweep(lane, "Working 30m")).state).toBe("done");
+      expect(f.alerts).toEqual([]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test("parses visible timer variants but not unrelated or absent durations", () => {
+    expect(workingTimer("\x1b[32m* Working (1h 2m 3s)\x1b[0m")).toEqual({ kind: "working", seconds: 3723, step: 1 });
+    expect(workingTimer("Running 21:05")).toEqual({ kind: "running", seconds: 1265, step: 1 });
+    expect(workingTimer("Working 25m")).toEqual({ kind: "working", seconds: 1500, step: 60 });
+    expect(workingTimer("Running 1:02:03")).toEqual({ kind: "running", seconds: 3723, step: 1 });
+    expect(workingTimer("Working ...")).toBeNull();
+    expect(workingTimer("log mentions Working 20m")).toBeNull();
+  });
+});

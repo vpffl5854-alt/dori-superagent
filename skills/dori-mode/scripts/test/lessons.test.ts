@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { LessonError, Lessons } from "../src/lessons.ts";
+import { GLOBAL_LESSON_CAP, LessonError, Lessons, renderLessons, REPO_LESSON_CAP } from "../src/lessons.ts";
 import { withState } from "./fakes.ts";
 
 const T0 = Date.parse("2026-10-29T00:00:00Z");
@@ -9,7 +9,10 @@ let state: ReturnType<typeof withState>;
 let lessons: Lessons;
 const input = { lane: "demo-lane", cwd: "/repo", rule: "Subscribe before triggering", evidence: "/evidence/test.txt" };
 
-beforeEach(() => { state = withState(); lessons = new Lessons(state.dir); });
+beforeEach(() => {
+  state = withState();
+  lessons = new Lessons(state.dir);
+});
 afterEach(() => state.done());
 
 test("add persists a pending lesson and mark appends without changing the original record", () => {
@@ -38,12 +41,18 @@ test("repo selection keeps eight newest eligible lessons and excludes other cwd 
   // When selecting for a lexically equivalent path.
   const selected = lessons.forRepo("/repo/../repo/").lessons;
   // Then scope, filtering, ordering and cap are all observable in record IDs.
-  expect(selected.map((lesson) => lesson.id)).toEqual(eligible.slice(-8).reverse().map((lesson) => lesson.id));
+  expect(selected.map((lesson) => lesson.id)).toEqual(
+    eligible
+      .slice(-8)
+      .reverse()
+      .map((lesson) => lesson.id),
+  );
 });
 
 test("equal timestamps use newest insertion and marking old lessons does not promote them", () => {
   // Given two lessons created at the same timestamp.
-  const first = lessons.add(input, T0), second = lessons.add(input, T0);
+  const first = lessons.add(input, T0),
+    second = lessons.add(input, T0);
   // When the older lesson is marked.
   lessons.mark(first.id, "helped");
   // Then creation order remains the tie-breaker.
@@ -100,7 +109,10 @@ test("a time that is not the canonical ISO form is a damaged line", () => {
   // Given one valid record and copies whose time Date.parse accepts but toISOString never writes.
   const added = lessons.add(input, T0);
   const bad = ["0", "2026-10-29", "Thu, 29 Oct 2026 00:00:00 GMT", "2026-10-29T00:00:00Z"];
-  writeFileSync(lessons.path, `${readFileSync(lessons.path, "utf8")}${bad.map((at) => JSON.stringify({ ...added, id: crypto.randomUUID(), at })).join("\n")}\n`);
+  writeFileSync(
+    lessons.path,
+    `${readFileSync(lessons.path, "utf8")}${bad.map((at) => JSON.stringify({ ...added, id: crypto.randomUUID(), at })).join("\n")}\n`,
+  );
   // When reading; then only the canonical record loads and each other line is named by its field.
   const read = lessons.read();
   expect(read.lessons).toEqual([added]);
@@ -111,7 +123,10 @@ test("an id that is not the lowercase UUID randomUUID writes is a damaged line",
   // Given one valid record and copies with ids of the right length but the wrong shape.
   const added = lessons.add(input, T0);
   const bad = ["-".repeat(36), "0".repeat(36), crypto.randomUUID().toUpperCase()];
-  writeFileSync(lessons.path, `${readFileSync(lessons.path, "utf8")}${bad.map((id) => JSON.stringify({ ...added, id })).join("\n")}\n`);
+  writeFileSync(
+    lessons.path,
+    `${readFileSync(lessons.path, "utf8")}${bad.map((id) => JSON.stringify({ ...added, id })).join("\n")}\n`,
+  );
   // When reading; then only the real record loads and each other line is named by its field.
   const read = lessons.read();
   expect(read.lessons).toEqual([added]);
@@ -122,12 +137,15 @@ test("a malformed or unknown field is rejected by name, and an immutable change 
   // Given one valid record and three bad copies of it.
   const added = lessons.add(input, T0);
   const original = readFileSync(lessons.path, "utf8");
-  writeFileSync(lessons.path, [
-    original.trimEnd(),
-    JSON.stringify({ ...added, outcome: "done" }),
-    JSON.stringify({ ...added, extra: 1 }),
-    JSON.stringify({ ...added, cwd: "/other" }),
-  ].join("\n") + "\n");
+  writeFileSync(
+    lessons.path,
+    [
+      original.trimEnd(),
+      JSON.stringify({ ...added, outcome: "done" }),
+      JSON.stringify({ ...added, extra: 1 }),
+      JSON.stringify({ ...added, cwd: "/other" }),
+    ].join("\n") + "\n",
+  );
   // When reading.
   const read = lessons.read();
   // Then each line's problem names its field, and the first record stands.
@@ -136,5 +154,90 @@ test("a malformed or unknown field is rejected by name, and an immutable change 
     expect.stringContaining(`:2: lesson field "outcome"`),
     expect.stringContaining(`:3: unknown lesson field "extra"`),
     expect.stringContaining(`:4: lesson field "cwd" changed for ${added.id}`),
+  ]);
+});
+
+test("global and repo lessons have their own caps, so globals never push repo lessons out; retired ones drop out", () => {
+  // Given more global rules than their cap (one retired), then more repo lessons than theirs, all newer than the globals.
+  const globals = Array.from({ length: GLOBAL_LESSON_CAP + 1 }, (_, i) =>
+    lessons.add(
+      {
+        lane: "lead",
+        scope: "global",
+        rule: i ? `Global ${i}` : "Clean up heavy job data right away",
+        evidence: `slack:D1/1.${i + 1}`,
+      },
+      T0 + i,
+    ),
+  );
+  lessons.mark(
+    lessons.add({ lane: "lead", scope: "global", rule: "Retired rule", evidence: "slack:D1/1.9" }, T0 + 9).id,
+    "harmful",
+  );
+  const repo = Array.from({ length: REPO_LESSON_CAP + 2 }, (_, i) =>
+    lessons.add({ ...input, rule: `Rule ${i}` }, T0 + 10 + i),
+  );
+  // When selecting for this repo and for an unrelated one.
+  const here = lessons.forRepo("/repo").lessons;
+  const elsewhere = lessons.forRepo("/unrelated").lessons;
+  // Then each kind keeps its own newest (4 global, 8 repo), and only the globals reach the other repo.
+  const newestGlobals = globals
+    .slice(-GLOBAL_LESSON_CAP)
+    .reverse()
+    .map((lesson) => lesson.id);
+  expect(here.map((lesson) => lesson.id)).toEqual([
+    ...newestGlobals,
+    ...repo
+      .slice(-REPO_LESSON_CAP)
+      .reverse()
+      .map((lesson) => lesson.id),
+  ]);
+  expect(elsewhere.map((lesson) => lesson.id)).toEqual(newestGlobals);
+  const global = globals[0];
+  if (!global) throw new Error("no global lesson added");
+  expect(global).toEqual({
+    id: global.id,
+    at: new Date(T0).toISOString(),
+    lane: "lead",
+    scope: "global",
+    rule: "Clean up heavy job data right away",
+    evidence: "slack:D1/1.1",
+    outcome: "pending",
+  });
+  expect("cwd" in global).toBe(false);
+});
+
+test("the brief preamble puts global lessons under their own heading above the repo lessons", () => {
+  // Given one global and one repo lesson.
+  lessons.add(input, T0);
+  lessons.add(
+    { lane: "lead", scope: "global", rule: "Never change the global Git identity", evidence: "slack:D1/2.1" },
+    T0 + 1,
+  );
+  // When rendered for the repo; then each kind has its section, global first.
+  expect(renderLessons(lessons.forRepo("/repo").lessons)).toBe(
+    "## Lessons for every lane\n- [pending; lead] Never change the global Git identity\n\n## Lessons for this repo\n- [pending; demo-lane] Subscribe before triggering\n\n",
+  );
+});
+
+test("a global lesson with a cwd, or a scope other than global, is a damaged line", () => {
+  // Given one valid global record and two bad copies.
+  const added = lessons.add(
+    { lane: "lead", scope: "global", rule: "Read the thread first", evidence: "slack:D1/3.1" },
+    T0,
+  );
+  writeFileSync(
+    lessons.path,
+    `${readFileSync(lessons.path, "utf8")}${[
+      JSON.stringify({ ...added, id: crypto.randomUUID(), cwd: "/repo" }),
+      JSON.stringify({ ...added, id: crypto.randomUUID(), scope: "repo", cwd: "/repo" }),
+    ].join("\n")}\n`,
+  );
+  // When reading; then only the valid record loads and each other line is named.
+  const read = lessons.read();
+  expect(read.lessons).toEqual([added]);
+  expect(read.problems).toEqual([
+    expect.stringContaining(':2: a global lesson has no field "cwd"'),
+    expect.stringContaining(':3: lesson field "scope" must be "global" or absent'),
   ]);
 });

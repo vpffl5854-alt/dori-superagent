@@ -1,18 +1,28 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
 import { claimDone, closeLane, objectDone, watchTick } from "../src/done-flow.ts";
-import { sendVerified, UnsafeTextError } from "../src/panes.ts";
 import { type Lane, statusOf } from "../src/registry.ts";
 import { depsFor, fakeClock, newWorld, sent, withState, type World, WT } from "./fakes.ts";
 
 const T0 = Date.parse("2026-01-01T12:00:00.000Z");
 const MIN = 60_000;
-const lane: Lane = { key: "demo-lane", title: "demo", thread: "chat:team/123", pane: "w:p1", brief: "/briefs/demo.md", done: "merged acme/app#1; closed acme/app#2", cwd: "/repo", openedAt: new Date(T0 - 60 * MIN).toISOString() };
+const lane: Lane = {
+  key: "demo-lane",
+  title: "demo",
+  thread: "chat:team/123",
+  pane: "w:p1",
+  brief: "/briefs/demo.md",
+  done: "merged acme/app#1; closed acme/app#2",
+  cwd: "/repo",
+  openedAt: new Date(T0 - 60 * MIN).toISOString(),
+};
 
 let state: ReturnType<typeof withState>;
 let world: World;
-const at = (ms: number) => depsFor(world, fakeClock(ms), state.dir, { hooks: { threadDone: ["notify", "{thread}", "{text}"] } });
-const closedVia = () => world.calls.filter((c) => c[0] === "herdr" && (c[1] === "pane" || c[1] === "tab") && c[2] === "close");
+const at = (ms: number) =>
+  depsFor(world, fakeClock(ms), state.dir, { hooks: { threadDone: ["notify", "{thread}", "{text}"] } });
+const closedVia = () =>
+  world.calls.filter((c) => c[0] === "herdr" && (c[1] === "pane" || c[1] === "tab") && c[2] === "close");
 
 beforeEach(async () => {
   state = withState();
@@ -99,7 +109,9 @@ test("a lane-owned worktree whose git state is unreadable still blocks the close
   world.isGitRepo = "false";
   await claimDone(at(T0), lane, "merged acme/app#1");
   await watchTick(at(T0 + 6 * MIN));
-  expect((await at(T0).registry.read("demo-lane"))?.objection?.reasons).toEqual([`unpushed work in ${WT} (git state unreadable)`]);
+  expect((await at(T0).registry.read("demo-lane"))?.objection?.reasons).toEqual([
+    `unpushed work in ${WT} (git state unreadable)`,
+  ]);
   expect(closedVia()).toHaveLength(0);
 });
 
@@ -140,65 +152,4 @@ test("closing directly refuses while a signal is not live and leaves the pane al
   expect(r.closed).toBe(false);
   expect(r.lines.at(-1)).toStartWith("REFUSED demo-lane");
   expect(closedVia()).toHaveLength(0);
-});
-
-test("delivery is confirmed by the pane's agent status moving to working, with exactly one Enter", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.onEnterStatus = "working";
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] please report")).toBe("delivered");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
-});
-
-test("a screen that still shows the text never causes another Enter; no status change is unconfirmed", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle" }];
-  world.stuckReads = 10;
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] stuck text still here")).toBe("unconfirmed");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
-});
-
-test("a pane that was already working cannot show a change, so the send is unconfirmed, not delivered", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "working" }];
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] queued while busy")).toBe("unconfirmed");
-  expect(world.calls.filter((c) => c[2] === "send-keys")).toHaveLength(1);
-});
-
-test("a pane with no running agent is a bare shell: nothing is typed, the send fails", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w" }];
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] please report")).toBe("failed");
-  world.panes = [];
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] please report")).toBe("failed");
-  expect(world.calls.filter((c) => c[2] === "send-text" || c[2] === "send-keys")).toHaveLength(0);
-});
-
-test("an agent suspended with Ctrl+Z is still reported idle, but the shell is in front: nothing is typed", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "opencode", agent_status: "idle", foreground: "-zsh" }];
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] please report")).toBe("failed");
-  expect(world.calls.filter((c) => c[2] === "send-text" || c[2] === "send-keys")).toHaveLength(0);
-});
-
-test("an agent with a non-interactive sh -c child in front is delivered to; an empty foreground group is doubt", async () => {
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle", foreground: [{ name: "pi", argv: ["pi"] }, { name: "sh", argv: ["sh", "-c", "true"] }] }];
-  world.onEnterStatus = "working";
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] one")).toBe("delivered");
-  world.panes = [{ pane_id: "w:p1", workspace_id: "w", agent: "pi", agent_status: "idle", foreground: [] }];
-  const before = world.calls.filter((c) => c[2] === "send-text").length;
-  expect(await sendVerified(at(T0).run, at(T0).clock, "w:p1", "[LEAD] two")).toBe("failed");
-  expect(world.calls.filter((c) => c[2] === "send-text").length).toBe(before);
-});
-
-test("a failed pane lookup is doubt: nothing is typed, the send fails", async () => {
-  const deps = at(T0);
-  const typed: (readonly string[])[] = [];
-  const run = async (argv: readonly string[]) => {
-    if (argv[1] === "pane" && argv[2] === "list") return { code: 1, out: "", err: "herdr down" };
-    if (argv[2] === "send-text" || argv[2] === "send-keys") typed.push(argv);
-    return deps.run(argv);
-  };
-  expect(await sendVerified(run as typeof deps.run, deps.clock, "w:p1", "[LEAD] please report")).toBe("failed");
-  expect(typed).toHaveLength(0);
-});
-
-test("text with a backtick never reaches a pane", async () => {
-  await expect(sendVerified(at(T0).run, at(T0).clock, "w:p1", "run `rm -rf`")).rejects.toBeInstanceOf(UnsafeTextError);
-  expect(world.calls).toHaveLength(0);
 });

@@ -18,7 +18,8 @@ export class ThreadLedger {
   async load(): Promise<void> {
     if (this.loaded) return;
     const f = Bun.file(this.file);
-    if (await f.exists()) for (const t of (await f.json()) as LedgerThread[]) this.threads.set(this.key(t.channel, t.rootTs), t);
+    if (await f.exists())
+      for (const t of (await f.json()) as LedgerThread[]) this.threads.set(this.key(t.channel, t.rootTs), t);
     this.loaded = true;
   }
 

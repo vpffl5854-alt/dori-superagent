@@ -3,19 +3,28 @@
   "version": "0.1.0",
   "description": "A proactive multi-session coding-agent harness in ~1,600 lines, running on herdr + omo.",
   "type": "module",
-  "license": "MIT",
+  "license": "SUL-1.0",
+  "packageManager": "bun@1.4.4",
   "bin": {
     "dori": "src/cli.ts"
   },
   "scripts": {
+    "check": "biome check .",
+    "fmt": "biome format --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p skills/dori-mode/scripts/tsconfig.json",
+    "lint:loc": "bun scripts/check-loc.ts",
+    "knip": "knip",
     "test": "bun test ./test/",
-    "typecheck": "tsc --noEmit"
+    "test:skill": "cd skills/dori-mode/scripts && bun test",
+    "ci": "bun run check && bun run typecheck && bun run knip && bun run lint:loc && bun run test && bun run test:skill"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.0",
-    "typescript": "^5.9.0"
+    "@biomejs/biome": "^2.6.6",
+    "@types/bun": "^1.4.4",
+    "knip": "^6.44.2",
+    "typescript": "^5.9"
   },
   "engines": {
-    "bun": ">=1.3"
+    "bun": ">=1.4.4"
   }
 }

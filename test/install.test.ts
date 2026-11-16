@@ -5,7 +5,15 @@ import { join, resolve } from "node:path";
 
 // The real install.sh over a checkout of a local upstream; a stub `bun` stands in for `bun install` and `bun link`.
 const script = resolve(import.meta.dir, "../install.sh");
-const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
+const gitEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_AUTHOR_NAME: "t",
+  GIT_AUTHOR_EMAIL: "t@example.com",
+  GIT_COMMITTER_NAME: "t",
+  GIT_COMMITTER_EMAIL: "t@example.com",
+};
 const roots: string[] = [];
 afterEach(() => {
   for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
@@ -42,7 +50,16 @@ function setup() {
     git(upstream, "commit", "-qam", text.trim());
   };
   const install = (env: Record<string, string> = {}) => {
-    const r = Bun.spawnSync(["bash", script], { env: { ...gitEnv, HOME: home, DORI_SRC: src, SKILLS_DIR: join(home, "skills"), PATH: `${bin}:${process.env.PATH}`, ...env } });
+    const r = Bun.spawnSync(["bash", script], {
+      env: {
+        ...gitEnv,
+        HOME: home,
+        DORI_SRC: src,
+        SKILLS_DIR: join(home, "skills"),
+        PATH: `${bin}:${process.env["PATH"]}`,
+        ...env,
+      },
+    });
     return { code: r.exitCode, err: r.stderr.toString() };
   };
   return { root, upstream, src, home, cli, upstreamCommit, install };

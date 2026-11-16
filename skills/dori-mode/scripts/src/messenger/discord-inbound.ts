@@ -1,595 +1,177 @@
-export type Inbound = {
-  readonly source: "guild" | "dm";
-  readonly channel: string;
-  readonly guild: string;
-  readonly messageId: string;
-  readonly author: string;
-  readonly authorIsBot: boolean;
-  readonly text: string;
-  readonly media?: readonly string[];
-  readonly replyToId?: string;
-  readonly replyToAuthor?: string;
-  readonly replyToText?: string;
-  /** User ids this message @-mentions, so a consumer can tell whose message it is without re-parsing text. */
-  readonly mentions?: readonly string[];
-};
+import {
+  backfillDeps,
+  catchUpDeps,
+  connectDeps,
+  frameDeps,
+  heartbeatDeps,
+  helloDeps,
+  lifecycleDeps,
+  reconnectDeps,
+  reportDeps,
+  type ReceiverState,
+} from "./discord-deps.ts";
+import { catchUp } from "./discord-catchup.ts";
+import { noteCursor } from "./discord-cursor.ts";
+import { deliver } from "./discord-deliver.ts";
+import { handle, handleDispatch } from "./discord-frames.ts";
+import { identify, startHeartbeat } from "./discord-heartbeat.ts";
+import { armHelloWait, clearHelloWait } from "./discord-hello.ts";
+import { idle, start, stop } from "./discord-lifecycle.ts";
+import { backfill, report } from "./discord-report.ts";
+import { clearPendingReconnect, reconnect, scheduleReconnect, sendPayload } from "./discord-reconnect.ts";
+import { connect } from "./discord-socket.ts";
+import {
+  RECONNECT_BACKOFF_CAP_MS,
+  RECONNECT_MAX_MS,
+  RECONNECT_MIN_MS,
+  type GatewayPayload,
+} from "./discord-gateway.ts";
+import type { MediaRef } from "./discord-media.ts";
+import type {
+  ChannelGuild,
+  ChannelHistory,
+  Clock,
+  CursorStore,
+  GatewaySocket,
+  Inbound,
+  MediaStore,
+} from "./discord-types.ts";
 
-export type MediaRef = {
-  readonly url: string;
-  readonly name: string;
-};
+export { formatInbound } from "./discord-record.ts";
+export { HELLO_WAIT_MS } from "./discord-gateway.ts";
 
-export type MediaStore = {
-  save(messageId: string, index: number, ref: MediaRef): Promise<readonly string[]>;
-};
-
-export type GatewaySocket = {
-  send(data: string): void;
-  close(): void;
-  onMessage(cb: (data: string) => void): void;
-  onClose?(cb: (code: number, reason: string) => void): void;
-};
-
-export type Clock = {
-  setInterval: (cb: () => void, ms: number) => unknown;
-  clearInterval: (h: unknown) => void;
-  setTimeout?: (cb: () => void, ms: number) => unknown;
-  clearTimeout?: (h: unknown) => void;
-};
-
-/** The newest message id seen in each channel, so a restart can ask Discord what it missed. */
-export type InboundCursors = Readonly<Record<string, string>>;
-
-export type CursorStore = {
-  read(): Promise<InboundCursors>;
-  write(cursors: InboundCursors): Promise<void>;
-};
-
-/** One page of a channel's history after `after`, in Discord's order (newest first). */
-export type ChannelHistory = (channel: string, after: string, limit: number) => Promise<readonly unknown[]>;
-
-/** The guild a channel belongs to; REST message payloads carry no `guild_id`, so a backfilled
- * message would otherwise be reported as a DM. */
-export type ChannelGuild = (channel: string) => Promise<string | null>;
-
-export const DISCORD_INTENTS_GUILD_MESSAGES = 1 << 9;
-export const DISCORD_INTENTS_DIRECT_MESSAGES = 1 << 12;
-export const DISCORD_INTENTS_MESSAGE_CONTENT = 1 << 15;
-
-export const DISCORD_INBOUND_INTENTS =
-  DISCORD_INTENTS_GUILD_MESSAGES | DISCORD_INTENTS_DIRECT_MESSAGES | DISCORD_INTENTS_MESSAGE_CONTENT;
-
-const OP_DISPATCH = 0;
-const OP_HEARTBEAT = 1;
-const OP_IDENTIFY = 2;
-const OP_RESUME = 6;
-const OP_RECONNECT = 7;
-const OP_INVALID_SESSION = 9;
-const OP_HELLO = 10;
-const OP_HEARTBEAT_ACK = 11;
-
-const EVENT_READY = "READY";
-const EVENT_MESSAGE_CREATE = "MESSAGE_CREATE";
-
-const DEFAULT_HEARTBEAT_MS = 41_250;
-/** A freshly opened socket that sends no HELLO within this window is dead; nothing else would ever
- * notice, because the heartbeat and its ack watch only exist once HELLO has arrived. */
-export const HELLO_WAIT_MS = 15_000;
-const RECONNECT_MIN_MS = 1_000;
-const RECONNECT_MAX_MS = 5_000;
-const RECONNECT_BACKOFF_CAP_MS = 60_000;
-const FATAL_CLOSE_CODES: ReadonlySet<number> = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
-const MAX_SEEN = 500;
-
-/** Discord caps a messages page at 100; a long outage needs several of them. */
-const BACKFILL_PAGE = 100;
-/** 2,000 messages is a long outage; past that the run stops and says so rather than paging forever. */
-const BACKFILL_MAX_PAGES = 20;
-
-type GatewayPayload = {
-  readonly op: number;
-  readonly s?: number | null;
-  readonly t?: string | null;
-  readonly d?: Record<string, unknown> | null;
-};
-
-type MessageCreate = {
-  readonly id?: string;
-  readonly channel_id?: string;
-  readonly guild_id?: string;
-  readonly content?: string;
-  readonly author?: { readonly id?: string; readonly username?: string; readonly bot?: boolean };
-  readonly attachments?: readonly unknown[];
-  readonly embeds?: readonly unknown[];
-  readonly message_reference?: { readonly message_id?: string };
-  readonly referenced_message?: MessageCreate | null;
-  readonly mentions?: readonly { readonly id?: string }[];
-};
-
-const MEDIA_LIMIT = 6;
-
-const cdnUrl = (value: unknown): string | null => {
-  const r = asRecord(value);
-  const url = r?.proxy_url ?? r?.url;
-  return typeof url === "string" && url ? url : null;
-};
-
-/** Every image or video a message carries, in the order a reader wants them: the file itself,
- * then what an embed shows (its image, its thumbnail, then a gifv's video). Discord's own
- * `proxy_url` wins over the origin URL, so an expiring signature never breaks a download. */
-export const mediaRefs = (data: unknown): readonly MediaRef[] => {
-  const m = asRecord(data) as MessageCreate | null;
-  if (!m) return [];
-  const out: MediaRef[] = [];
-  for (const attachment of Array.isArray(m.attachments) ? m.attachments : []) {
-    const r = asRecord(attachment);
-    const url = cdnUrl(r);
-    if (!url) continue;
-    const name = typeof r?.filename === "string" ? r.filename : typeof r?.content_type === "string" ? r.content_type : "file";
-    out.push({ url, name });
-  }
-  for (const embed of Array.isArray(m.embeds) ? m.embeds : []) {
-    const r = asRecord(embed);
-    if (!r) continue;
-    for (const key of ["image", "thumbnail", "video"] as const) {
-      const url = cdnUrl(r[key]);
-      if (url) out.push({ url, name: key === "video" ? "video.mp4" : `${key}.png` });
-    }
-  }
-  const seen = new Set<string>();
-  return out.filter((ref) => (seen.has(ref.url) ? false : (seen.add(ref.url), true))).slice(0, MEDIA_LIMIT);
-};
-
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
-
-/** Discord ids are snowflakes: a longer id is newer, and equal lengths compare as text. */
-export const newerId = (a: string, b: string): string => {
-  if (!a) return b;
-  if (!b) return a;
-  if (a.length !== b.length) return a.length > b.length ? a : b;
-  return a >= b ? a : b;
-};
-
-const idOf = (data: unknown): string => {
-  const id = asRecord(data)?.id;
-  return typeof id === "string" ? id : "";
-};
-
-export const toInbound = (data: unknown, selfId: string, guildHint?: string | null): Inbound | null => {
-  const m = asRecord(data) as MessageCreate | null;
-  if (!m) return null;
-  const id = m.id ?? "";
-  const channel = m.channel_id ?? "";
-  const authorId = m.author?.id ?? "";
-  if (!id || !channel || !authorId) return null;
-  if (authorId === selfId) return null;
-  const text = (m.content ?? "").trim();
-  const attachmentCount = Array.isArray(m.attachments) ? m.attachments.length : 0;
-  const media = mediaRefs(data);
-  if (!text && attachmentCount === 0 && media.length === 0) return null;
-  const guild = m.guild_id ?? guildHint ?? undefined;
-  const ref = m.message_reference?.message_id;
-  const replied = (m.referenced_message ?? null) as MessageCreate | null;
-  return {
-    source: guild ? "guild" : "dm",
-    channel,
-    guild: guild ?? "-",
-    messageId: id,
-    author: m.author?.username ?? authorId,
-    authorIsBot: m.author?.bot === true,
-    text: text || (attachmentCount > 0 ? `[${attachmentCount} attachment(s)]` : "[media]"),
-    ...(ref
-      ? {
-          replyToId: ref,
-          replyToAuthor: replied?.author?.username ?? undefined,
-          replyToText: (replied?.content ?? "").trim().slice(0, REPLY_PREVIEW) || undefined,
-        }
-      : {}),
-    ...(Array.isArray(m.mentions) && m.mentions.length > 0
-      ? { mentions: m.mentions.map((u) => u?.id ?? "").filter((id) => id.length > 0) }
-      : {}),
-  };
-};
-
-/** A replaced message is quoted as a preview; the quoted message normally has its own line. */
-const REPLY_PREVIEW = 300;
-
-/** The message text goes out whole: JSON.stringify keeps it on one line, and cutting it would
- * leave the monitor with no way to tell a short message from a long one. */
-export const formatInbound = (i: Inbound): string =>
-  `INBOUND discord ${i.source} ${i.channel} ${i.guild} ${i.messageId} ${i.author} ${JSON.stringify(i.text)}` +
-  (i.mentions && i.mentions.length > 0 ? ` mentions=${i.mentions.join(",")}` : "") +
-  (i.media && i.media.length > 0 ? ` media=${i.media.join(",")}` : "") +
-  (i.replyToId
-    ? ` reply_to=${i.replyToId}${i.replyToAuthor ? ` reply_author=${JSON.stringify(i.replyToAuthor)}` : ""}${
-        i.replyToText ? ` reply_text=${JSON.stringify(i.replyToText)}` : ""
-      }`
-    : "");
+export type {
+  ChannelGuild,
+  ChannelHistory,
+  Clock,
+  CursorStore,
+  GatewaySocket,
+  Inbound,
+  InboundCursors,
+  MediaRef,
+  MediaStore,
+} from "./discord-types.ts";
 
 export class DiscordInbound {
-  private socket: GatewaySocket | null = null;
-  private beat: unknown;
-  private hello: unknown;
+  public socket: GatewaySocket | null = null;
+  public beat: unknown;
+  public hello: unknown;
   /** Bumped on every arm/clear so a callback already queued by the timer cannot act on a later socket. */
-  private helloWait = 0;
-  private sequence: number | null = null;
-  private sessionId: string | null = null;
-  private acked = true;
-  private stopped = false;
-  private readonly seen = new Set<string>();
-  private chain: Promise<void> = Promise.resolve();
+  public helloWait = 0;
+  public sequence: number | null = null;
+  public sessionId: string | null = null;
+  public acked = true;
+  public stopped = false;
+  public readonly seen = new Set<string>();
+  public chain: Promise<void> = Promise.resolve();
   /** Every line goes out through here, one at a time: arrival order, print order and cursor order
    * stay the same, which is what lets the cursor mean "everything up to this id has been printed". */
-  private deliveries: Promise<void> = Promise.resolve();
-  private cursorMap: Record<string, string> = {};
-  private cursorWrite: Promise<void> = Promise.resolve();
-  private readonly caughtUp = new Set<string>();
-  private reconnects = 0;
-  private pendingReconnect: unknown;
+  public deliveries: Promise<void> = Promise.resolve();
+  public cursorMap: Record<string, string> = {};
+  public cursorWrite: Promise<void> = Promise.resolve();
+  public readonly caughtUp = new Set<string>();
+  public reconnects = 0;
+  public pendingReconnect: unknown;
 
   constructor(
-    private readonly open: () => GatewaySocket,
-    private readonly token: string,
-    private readonly clock: Clock,
-    private readonly selfId: string,
-    private readonly onInbound: (i: Inbound) => void,
-    private readonly onEvent: (line: string) => void = () => {},
-    private readonly store: MediaStore | null = null,
-    private readonly cursors: CursorStore | null = null,
-    private readonly history: ChannelHistory | null = null,
-    private readonly guildOf: ChannelGuild | null = null,
+    public readonly open: () => GatewaySocket,
+    public readonly token: string,
+    public readonly clock: Clock,
+    public readonly selfId: string,
+    public readonly onInbound: (i: Inbound) => void,
+    public readonly onEvent: (line: string) => void = () => {},
+    public readonly store: MediaStore | null = null,
+    public readonly cursors: CursorStore | null = null,
+    public readonly history: ChannelHistory | null = null,
+    public readonly guildOf: ChannelGuild | null = null,
   ) {}
 
   start(): void {
-    this.stopped = false;
-    this.caughtUp.clear();
-    this.connect();
-    this.backfill();
+    start(lifecycleDeps(this.state()));
   }
 
-  /** Resolves once every message dispatched so far has been reported, media and all, and the
-   * cursor file has caught up — tests await this instead of sleeping. */
   async idle(): Promise<void> {
-    for (;;) {
-      const chain = this.chain;
-      const deliveries = this.deliveries;
-      const write = this.cursorWrite;
-      await Promise.all([chain, deliveries, write]);
-      if (chain === this.chain && deliveries === this.deliveries && write === this.cursorWrite) return;
-    }
+    await idle(lifecycleDeps(this.state()));
   }
 
   stop(): void {
-    this.stopped = true;
-    this.clearHelloWait();
-    this.clearPendingReconnect();
-    if (this.beat !== undefined) this.clock.clearInterval(this.beat);
-    this.beat = undefined;
-    this.socket?.close();
-    this.socket = null;
-  }
-
-  private connect(): void {
-    if (this.stopped) return;
-    const socket = this.open();
-    this.socket = socket;
-    socket.onMessage((raw) => {
-      if (this.stopped || this.socket !== socket) return;
-      this.handle(raw);
-    });
-    socket.onClose?.((code, reason) => {
-      if (this.stopped || this.socket !== socket) return;
-      if (FATAL_CLOSE_CODES.has(code)) {
-        this.onEvent(`gateway closed with ${code} (${reason || "no reason"}); not reconnecting`);
-        this.stopped = true;
-        this.clearHelloWait();
-        if (this.beat !== undefined) this.clock.clearInterval(this.beat);
-        this.beat = undefined;
-        this.socket = null;
-        return;
-      }
-      this.onEvent(`gateway closed with ${code} (${reason || "no reason"}); reconnecting`);
-      this.reconnect();
-    });
-    this.armHelloWait(socket);
-  }
-
-  /** Discord sends HELLO as the first frame on every connection. Without this timer a socket that
-   * connects and then goes silent is indistinguishable from a quiet channel: no heartbeat, no ack
-   * watch, no reconnect, forever. */
-  private armHelloWait(socket: GatewaySocket): void {
-    this.clearHelloWait();
-    const wait = this.helloWait;
-    this.hello = this.clock.setInterval(() => {
-      if (this.stopped || this.socket !== socket || wait !== this.helloWait) return;
-      this.clearHelloWait();
-      this.onEvent(`gateway sent no HELLO within ${HELLO_WAIT_MS / 1000}s; reconnecting`);
-      this.reconnect();
-    }, HELLO_WAIT_MS);
-  }
-
-  private clearHelloWait(): void {
-    this.helloWait++;
-    if (this.hello !== undefined) this.clock.clearInterval(this.hello);
-    this.hello = undefined;
+    stop(lifecycleDeps(this.state()));
   }
 
   handle(raw: string): void {
-    let payload: GatewayPayload;
-    try {
-      payload = JSON.parse(raw) as GatewayPayload;
-    } catch {
-      return;
-    }
-    if (typeof payload.s === "number") this.sequence = payload.s;
-
-    if (payload.op === OP_HELLO) {
-      this.clearHelloWait();
-      this.startHeartbeat(payload.d);
-      return;
-    }
-    if (payload.op === OP_HEARTBEAT_ACK) {
-      this.acked = true;
-      return;
-    }
-    if (payload.op === OP_HEARTBEAT) {
-      this.send({ op: OP_HEARTBEAT, d: this.sequence });
-      return;
-    }
-    if (payload.op === OP_RECONNECT) {
-      this.onEvent("gateway asked to reconnect");
-      this.reconnect();
-      return;
-    }
-    if (payload.op === OP_INVALID_SESSION) {
-      this.sessionId = null;
-      this.sequence = null;
-      this.onEvent("gateway invalidated the session");
-      this.reconnect();
-      return;
-    }
-    if (payload.op === OP_DISPATCH) this.handleDispatch(payload);
+    handle(frameDeps(this.state()), raw);
   }
 
-  private handleDispatch(payload: GatewayPayload): void {
-    if (payload.t === EVENT_READY) {
-      const d = asRecord(payload.d);
-      this.sessionId = typeof d?.session_id === "string" ? d.session_id : null;
-      this.onEvent("gateway ready");
-      this.reconnects = 0;
-      this.backfill();
-      return;
-    }
-    if (payload.t !== EVENT_MESSAGE_CREATE) return;
-    this.report(payload.d);
+  public connect(): void {
+    connect(connectDeps(this.state()));
   }
 
-  /** The one path a message takes, whether it arrived on the socket or from a backfill page.
-   * Resolves true once the line is out and the channel cursor has moved past it, false when the
-   * line could not be printed (the cursor stays behind, so a restart replays it); null when there
-   * is no line at all — filtered, a duplicate, or nothing to report. */
-  private report(data: unknown, guildHint?: string | null): Promise<boolean> | null {
-    const inbound = toInbound(data, this.selfId, guildHint);
-    if (!inbound) return null;
-    if (this.seen.has(inbound.messageId)) return null;
-    this.seen.add(inbound.messageId);
-    if (this.seen.size > MAX_SEEN) {
-      const oldest = this.seen.values().next().value;
-      if (oldest !== undefined) this.seen.delete(oldest);
-    }
-    return this.deliver(inbound, mediaRefs(data)).then(
-      () => {
-        if (this.caughtUp.has(inbound.channel)) this.noteCursor(inbound.channel, inbound.messageId);
-        return true;
-      },
-      (e) => {
-        this.seen.delete(inbound.messageId);
-        this.onEvent(`delivery failed: ${(e as Error).message}`);
-        return false;
-      },
-    );
+  public armHelloWait(socket: GatewaySocket): void {
+    armHelloWait(helloDeps(this.state()), socket);
   }
 
-  /** A restart identifies from scratch, so Discord replays nothing: whatever arrived while the
-   * process was down is only reachable through the REST history, channel by channel. */
-  private backfill(): void {
-    const store = this.cursors;
-    const history = this.history;
-    if (!store || !history) return;
-    this.chain = this.chain
-      .then(async () => {
-        let stored: InboundCursors;
-        try {
-          stored = await store.read();
-        } catch (e) {
-          this.onEvent(`cursor read failed: ${(e as Error).message}`);
-          return;
-        }
-        this.cursorMap = { ...stored, ...this.cursorMap };
-        for (const [channel, after] of Object.entries(this.cursorMap)) {
-          if (!channel || !after) continue;
-          await this.catchUp(channel, after);
-        }
-      })
-      .catch((e) => this.onEvent(`backfill failed: ${(e as Error).message}`));
+  public clearHelloWait(): void {
+    clearHelloWait(helloDeps(this.state()));
   }
 
-  private async catchUp(channel: string, after: string): Promise<void> {
-    const history = this.history;
-    if (!history) return;
-    let cursor = after;
-    let fetched = 0;
-    let delivered = 0;
-    let truncated = false;
-    let clean = true;
-    let guild: string | null = null;
-    try {
-      guild = this.guildOf ? await this.guildOf(channel) : null;
-    } catch (e) {
-      this.onEvent(`guild lookup failed for ${channel}: ${(e as Error).message}`);
-    }
-    for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
-      let rows: readonly unknown[];
-      try {
-        rows = await history(channel, cursor, BACKFILL_PAGE);
-      } catch (e) {
-        this.onEvent(`backfill stopped for ${channel}: ${(e as Error).message}`);
-        clean = false;
-        break;
-      }
-      if (!Array.isArray(rows) || rows.length === 0) break;
-      const ordered = [...rows].sort((a, b) => {
-        const left = idOf(a);
-        const right = idOf(b);
-        if (!left || !right || left === right) return 0;
-        return newerId(left, right) === left ? 1 : -1;
-      });
-      for (const row of ordered) {
-        const sent = this.report(row, guild);
-        if (sent !== null && !(await sent)) {
-          // The line never came out. Leave the cursor on the last row that did, so the next
-          // restart fetches this message again instead of skipping past it.
-          this.onEvent(`backfill stopped for ${channel}: delivery failed`);
-          return;
-        }
-        if (sent !== null) delivered++;
-        // The cursor means "everything up to here is handled", including the bot's own messages and
-        // anything this run filtered, so the next restart does not fetch them again. It moves one
-        // row at a time and only after that row's line, so a page as a whole can never overtake a
-        // message whose download is still running.
-        this.noteCursor(channel, idOf(row));
-        cursor = newerId(cursor, idOf(row));
-      }
-      fetched += rows.length;
-      if (rows.length < BACKFILL_PAGE) break;
-      if (page === BACKFILL_MAX_PAGES - 1) truncated = true;
-    }
-    if (fetched > 0) {
-      this.onEvent(
-        `backfill fetched ${fetched} message(s) in ${channel}, delivered ${delivered}${truncated ? " (stopped at the page limit)" : ""}`,
-      );
-    }
-    if (clean && !truncated) this.caughtUp.add(channel);
+  public handleDispatch(payload: GatewayPayload): void {
+    handleDispatch(frameDeps(this.state()), payload);
   }
 
-  /** Persisted per channel: a single global id would skip a quiet channel whose messages are older
-   * than the busiest channel's newest one, and the skip is silent. */
-  private noteCursor(channel: string, messageId: string): void {
-    const store = this.cursors;
-    if (!store || !channel || !messageId) return;
-    const current = this.cursorMap[channel];
-    const next = current === undefined ? messageId : newerId(current, messageId);
-    if (next === current) return;
-    this.cursorMap = { ...this.cursorMap, [channel]: next };
-    const snapshot = this.cursorMap;
-    this.cursorWrite = this.cursorWrite
-      .then(() => store.write(snapshot))
-      .catch((e) => this.onEvent(`cursor write failed: ${(e as Error).message}`));
+  public report(data: unknown, guildHint?: string | null): Promise<boolean> | null {
+    return report(reportDeps(this.state()), data, guildHint);
   }
 
-  /** One message at a time, so the lane sees every image cache-warm and in the order the messages
-   * arrived; a text line waits its turn rather than overtaking a download, because the cursor has
-   * to move in the same order as the lines. A download that fails prints the line without
-   * `media=`: the message itself is never held back. */
-  private deliver(inbound: Inbound, refs: readonly MediaRef[]): Promise<void> {
-    const store = this.store;
-    const job = this.deliveries.then(async () => {
-      if (!store || refs.length === 0) {
-        this.onInbound(inbound);
-        return;
-      }
-      const media: string[] = [];
-      for (const [index, ref] of refs.entries()) {
-        try {
-          media.push(...(await store.save(inbound.messageId, index, ref)));
-        } catch (e) {
-          this.onEvent(`media download failed: ${(e as Error).message}`);
-        }
-      }
-      this.onInbound(media.length > 0 ? { ...inbound, media } : inbound);
-    });
-    this.deliveries = job.catch((e) => this.onEvent(`media queue failed: ${(e as Error).message}`));
+  public backfill(): void {
+    backfill(backfillDeps(this.state()));
+  }
+
+  public catchUp(channel: string, after: string): Promise<void> {
+    return catchUp(catchUpDeps(this.state()), channel, after);
+  }
+
+  public noteCursor(channel: string, messageId: string): void {
+    const next = noteCursor(this.cursors, this.cursorMap, this.cursorWrite, channel, messageId, this.onEvent);
+    this.cursorMap = next.cursorMap;
+    this.cursorWrite = next.cursorWrite;
+  }
+
+  public deliver(inbound: Inbound, refs: readonly MediaRef[]): Promise<void> {
+    const job = deliver(this.deliveries, this.store, inbound, refs, this.onInbound, this.onEvent);
+    this.deliveries = job.catch(() => {});
     return job;
   }
 
-  private startHeartbeat(d: Record<string, unknown> | null | undefined): void {
-    const interval = typeof d?.heartbeat_interval === "number" ? d.heartbeat_interval : DEFAULT_HEARTBEAT_MS;
-    if (this.beat !== undefined) this.clock.clearInterval(this.beat);
-    this.acked = true;
-    this.beat = this.clock.setInterval(() => {
-      if (!this.acked) {
-        this.onEvent("gateway missed a heartbeat ack; reconnecting");
-        this.reconnect();
-        return;
-      }
-      this.acked = false;
-      this.send({ op: OP_HEARTBEAT, d: this.sequence });
-    }, interval);
-    this.send({ op: OP_HEARTBEAT, d: this.sequence });
-    this.acked = false;
-    this.identify();
+  public startHeartbeat(payload: Record<string, unknown> | null | undefined): void {
+    startHeartbeat(heartbeatDeps(this.state()), payload);
   }
 
-  private identify(): void {
-    if (this.sessionId !== null && this.sequence !== null) {
-      this.send({
-        op: OP_RESUME,
-        d: { token: this.token, session_id: this.sessionId, seq: this.sequence },
-      });
-      return;
-    }
-    this.send({
-      op: OP_IDENTIFY,
-      d: {
-        token: this.token,
-        intents: DISCORD_INBOUND_INTENTS,
-        properties: { os: process.platform, browser: "dori", device: "dori" },
-      },
-    });
+  public identify(): void {
+    identify(heartbeatDeps(this.state()));
   }
 
-  private reconnect(): void {
-    if (this.stopped) return;
-    this.clearHelloWait();
+  public clearBeat(): void {
     if (this.beat !== undefined) this.clock.clearInterval(this.beat);
     this.beat = undefined;
-    this.socket?.close();
-    this.socket = null;
-    this.scheduleReconnect();
   }
 
-  private reconnectDelay(): number {
-    const span = RECONNECT_MAX_MS - RECONNECT_MIN_MS;
-    const base = RECONNECT_MIN_MS + Math.floor(Math.random() * (span + 1));
-    const exponent = Math.min(this.reconnects, 6);
-    return Math.min(base * 2 ** exponent, RECONNECT_BACKOFF_CAP_MS);
+  public reconnect(): void {
+    reconnect(reconnectDeps(this.state()));
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopped) return;
-    this.clearPendingReconnect();
-    const delay = this.reconnectDelay();
-    this.reconnects++;
-    const fire = () => {
-      this.pendingReconnect = undefined;
-      this.connect();
-    };
-    if (this.clock.setTimeout) this.pendingReconnect = this.clock.setTimeout(fire, delay);
-    else fire();
+  public scheduleReconnect(): void {
+    scheduleReconnect(reconnectDeps(this.state()), RECONNECT_MIN_MS, RECONNECT_MAX_MS, RECONNECT_BACKOFF_CAP_MS);
   }
 
-  private clearPendingReconnect(): void {
-    if (this.pendingReconnect === undefined) return;
-    this.clock.clearTimeout?.(this.pendingReconnect);
-    this.pendingReconnect = undefined;
+  public clearPendingReconnect(): void {
+    clearPendingReconnect(reconnectDeps(this.state()));
   }
 
-  private send(payload: Record<string, unknown>): void {
-    try {
-      this.socket?.send(JSON.stringify(payload));
-    } catch (e) {
-      this.onEvent(`gateway send failed: ${(e as Error).message}`);
-    }
+  public send(payload: Record<string, unknown>): void {
+    sendPayload(reconnectDeps(this.state()), payload);
+  }
+
+  private state(): ReceiverState {
+    return this as unknown as ReceiverState;
   }
 }

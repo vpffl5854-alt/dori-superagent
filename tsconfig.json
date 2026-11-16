@@ -1,20 +1,7 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": false,
-    "skipLibCheck": true,
-    "types": [
-      "bun"
-    ]
+    "module": "ESNext"
   },
-  "include": [
-    "src",
-    "test"
-  ]
+  "include": ["src", "test", "scripts"]
 }

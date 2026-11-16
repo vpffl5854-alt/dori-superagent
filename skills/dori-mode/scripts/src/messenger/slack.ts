@@ -5,6 +5,19 @@ import type { ThreadLedger } from "./thread-ledger.ts";
 export type SlackAuth = { readonly token: string; readonly cookie?: string };
 export type Posted = { readonly channel: string; readonly ts: string };
 
+/**
+ * Methods the Web API reads only from a form body: given JSON they answer `invalid_arguments` whatever the arguments
+ * (#180, measured against the live API both ways). Their parameters are flat strings and numbers, which a form can carry.
+ */
+const FORM_METHODS: ReadonlySet<string> = new Set(["conversations.replies", "files.getUploadURLExternal"]);
+
+const asForm = (params: Record<string, unknown>): string =>
+  new URLSearchParams(
+    Object.entries(params).flatMap(([k, v]): [string, string][] =>
+      v === undefined || v === null ? [] : [[k, String(v)]],
+    ),
+  ).toString();
+
 export class Slack {
   constructor(
     private readonly http: Http,
@@ -23,31 +36,66 @@ export class Slack {
   }
 
   async call(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const res = await withBackoff(this.http, this.clock, { method: "POST", url: `${this.base}/${method}`, headers: this.headers(true), body: JSON.stringify(params) });
+    const form = FORM_METHODS.has(method);
+    const res = await withBackoff(this.http, this.clock, {
+      method: "POST",
+      url: `${this.base}/${method}`,
+      headers: form
+        ? { ...this.headers(false), "Content-Type": "application/x-www-form-urlencoded; charset=utf-8" }
+        : this.headers(true),
+      body: form ? asForm(params) : JSON.stringify(params),
+    });
     const body = JSON.parse(res.body || "{}") as Record<string, unknown>;
-    if (res.status !== 200 || body.ok !== true) throw new MessengerError(`slack ${method}: ${String(body.error ?? res.status)}`, res.status, String(body.error ?? ""));
-    if (this.ledger && method === "chat.postMessage" && typeof body.ts === "string") {
-      const channel = String(body.channel ?? params.channel);
-      await this.ledger.record(channel, typeof params.thread_ts === "string" ? params.thread_ts : body.ts, body.ts);
+    if (res.status !== 200 || body["ok"] !== true)
+      throw new MessengerError(
+        `slack ${method}: ${String(body["error"] ?? res.status)}`,
+        res.status,
+        String(body["error"] ?? ""),
+      );
+    if (this.ledger && method === "chat.postMessage" && typeof body["ts"] === "string") {
+      const channel = String(body["channel"] ?? params["channel"]);
+      await this.ledger.record(
+        channel,
+        typeof params["thread_ts"] === "string" ? params["thread_ts"] : body["ts"],
+        body["ts"],
+      );
     }
     return body;
   }
 
   async post(channel: string, text: string, threadTs?: string): Promise<Posted> {
-    const r = await this.call("chat.postMessage", { channel, text: guardText(text), ...(threadTs ? { thread_ts: threadTs } : {}) });
-    return { channel: String(r.channel), ts: String(r.ts) };
+    const r = await this.call("chat.postMessage", {
+      channel,
+      text: guardText(text),
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+    });
+    return { channel: String(r["channel"]), ts: String(r["ts"]) };
   }
 
   async edit(channel: string, ts: string, text: string): Promise<void> {
     await this.call("chat.update", { channel, ts, text: guardText(text) });
   }
 
-  async upload(channel: string, filename: string, bytes: Uint8Array<ArrayBuffer>, threadTs?: string, title?: string): Promise<string> {
+  async upload(
+    channel: string,
+    filename: string,
+    bytes: Uint8Array<ArrayBuffer>,
+    threadTs?: string,
+    title?: string,
+  ): Promise<string> {
     const slot = await this.call("files.getUploadURLExternal", { filename, length: bytes.byteLength });
-    const put = await withBackoff(this.http, this.clock, { method: "POST", url: String(slot.upload_url), body: bytes });
+    const put = await withBackoff(this.http, this.clock, {
+      method: "POST",
+      url: String(slot["upload_url"]),
+      body: bytes,
+    });
     if (put.status !== 200) throw new MessengerError(`slack upload: ${put.status}`, put.status);
-    await this.call("files.completeUploadExternal", { files: [{ id: slot.file_id, title: title ?? filename }], channel_id: channel, ...(threadTs ? { thread_ts: threadTs } : {}) });
-    return String(slot.file_id);
+    await this.call("files.completeUploadExternal", {
+      files: [{ id: slot["file_id"], title: title ?? filename }],
+      channel_id: channel,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+    });
+    return String(slot["file_id"]);
   }
 
   async setPresence(presence: "auto" | "away"): Promise<void> {

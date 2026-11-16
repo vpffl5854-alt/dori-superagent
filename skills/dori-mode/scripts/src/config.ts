@@ -1,8 +1,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { SupervisionOptions } from "./supervision.ts";
-import type { CommitIdentity } from "./verify-pr.ts";
+import type { RuntimeKind } from "../../../../src/runtime/types.ts";
+import type { SupervisionOptions } from "./supervision-observe.ts";
+import type { CommitIdentity } from "./verify-pr-check.ts";
 
 export type ArgvTemplate = readonly string[];
 
@@ -21,6 +22,8 @@ export type GuardThresholds = {
 };
 
 export type DoriConfig = {
+  /** Where new sessions open; absent = detected (see run.ts runtimeChoice). */
+  readonly runtime?: RuntimeKind;
   readonly stateDir: string;
   readonly laneWorkspace: string;
   readonly workspaces: readonly string[];
@@ -31,6 +34,8 @@ export type DoriConfig = {
   readonly defaultModel: string;
   readonly launchKeywords: string;
   readonly goalMarker: string;
+  /** How long `launch` waits for the agent's ready status and goal after it starts; a slow host is a host property. */
+  readonly startupWaitSeconds: number;
   readonly sessionsDir: string;
   readonly nudgeAfterMin: number;
   readonly postAfterMin: number;
@@ -56,6 +61,7 @@ export const defaultConfig = (home = homedir()): DoriConfig => ({
   defaultModel: "anthropic/claude-opus-5-5",
   launchKeywords: "ulw set goal and work",
   goalMarker: "Pursuing goal",
+  startupWaitSeconds: 180,
   sessionsDir: join(home, ".omo", "agent", "sessions"),
   nudgeAfterMin: 15,
   postAfterMin: 20,
@@ -66,32 +72,72 @@ export const defaultConfig = (home = homedir()): DoriConfig => ({
   guard: { loadAlert: 150, loadOk: 80, memFreeMinPct: 20, diskFreeMinGb: 50, panesMax: 20 },
   hooks: {},
   repoIdentities: {},
-  supervision: { hungAfterMinutes: 20, staleAfterMinutes: 20, defaults: { wallMinutes: null, tokens: null, costUsd: null } },
+  supervision: {
+    hungAfterMinutes: 20,
+    staleAfterMinutes: 20,
+    defaults: { wallMinutes: null, tokens: null, costUsd: null },
+  },
 });
 
-export const configPath = (): string => process.env.DORI_CONFIG ?? join(homedir(), ".dori", "config.json");
+export const configPath = (): string => process.env["DORI_CONFIG"] ?? join(homedir(), ".dori", "config.json");
 
-export const expandHome = (path: string, home = homedir()): string => (path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path);
+export const expandHome = (path: string, home = homedir()): string =>
+  path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : path;
 
 const isIdentity = (value: unknown): value is CommitIdentity => {
   const v = value as { name?: unknown; email?: unknown } | null;
-  return typeof v === "object" && v !== null && typeof v.name === "string" && !!v.name.trim() && typeof v.email === "string" && !!v.email.trim();
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof v.name === "string" &&
+    !!v.name.trim() &&
+    typeof v.email === "string" &&
+    !!v.email.trim()
+  );
 };
 
 // The file is untrusted JSON: keep only well-formed identities, so a bad entry reads as an unconfigured repo.
 const repoIdentities = (value: unknown): Record<string, CommitIdentity> =>
-  typeof value !== "object" || value === null || Array.isArray(value) ? {}
-    : Object.fromEntries(Object.entries(value).flatMap(([repo, identity]) => (isIdentity(identity) ? [[repo.toLowerCase(), identity]] : [])));
+  typeof value !== "object" || value === null || Array.isArray(value)
+    ? {}
+    : Object.fromEntries(
+        Object.entries(value).flatMap(([repo, identity]) =>
+          isIdentity(identity) ? [[repo.toLowerCase(), identity]] : [],
+        ),
+      );
 
 export class ConfigError extends Error {}
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const RUNTIMES: Readonly<Record<RuntimeKind, true>> = { herdr: true, hc: true };
+const checkRuntime = (value: unknown): void => {
+  if (value !== undefined && !(typeof value === "string" && Object.hasOwn(RUNTIMES, value)))
+    throw new ConfigError(
+      `invalid runtime: expected ${Object.keys(RUNTIMES)
+        .map((k) => JSON.stringify(k))
+        .join(" or ")}, got ${JSON.stringify(value)}`,
+    );
+};
 
-const SUPERVISION_KEYS = new Set(["hungAfterMinutes", "staleAfterMinutes", "defaults", "lanes", "usageArgv", "recordCostArgv", "activityPaths", "gitActivity"]);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const SUPERVISION_KEYS = new Set([
+  "hungAfterMinutes",
+  "staleAfterMinutes",
+  "defaults",
+  "lanes",
+  "usageArgv",
+  "recordCostArgv",
+  "activityPaths",
+  "gitActivity",
+]);
 const CEILINGS = new Set(["wallMinutes", "tokens", "costUsd"]);
 const checkCeilingNames = (where: string, budget: Record<string, unknown>): void => {
   for (const name of Object.keys(budget)) {
-    if (!CEILINGS.has(name)) throw new ConfigError(`invalid supervision ${where}.${name}: unknown ceiling (expected wallMinutes, tokens or costUsd)`);
+    if (!CEILINGS.has(name))
+      throw new ConfigError(
+        `invalid supervision ${where}.${name}: unknown ceiling (expected wallMinutes, tokens or costUsd)`,
+      );
   }
 };
 
@@ -104,10 +150,11 @@ const checkSupervision = (value: unknown): void => {
     if (!SUPERVISION_KEYS.has(name)) throw new ConfigError(`invalid supervision ${name}: unknown setting`);
   }
   for (const name of ["defaults", "lanes"] as const) {
-    if (value[name] !== undefined && !isRecord(value[name])) throw new ConfigError(`invalid supervision ${name}: expected an object`);
+    if (value[name] !== undefined && !isRecord(value[name]))
+      throw new ConfigError(`invalid supervision ${name}: expected an object`);
   }
-  if (isRecord(value.defaults)) checkCeilingNames("defaults", value.defaults);
-  for (const [key, budget] of Object.entries(isRecord(value.lanes) ? value.lanes : {})) {
+  if (isRecord(value["defaults"])) checkCeilingNames("defaults", value["defaults"]);
+  for (const [key, budget] of Object.entries(isRecord(value["lanes"]) ? value["lanes"] : {})) {
     if (!isRecord(budget)) throw new ConfigError(`invalid supervision lanes.${key}: expected an object`);
     checkCeilingNames(`lanes.${key}`, budget);
   }
@@ -117,38 +164,57 @@ const checkSupervision = (value: unknown): void => {
       throw new ConfigError(`invalid supervision ${name}: expected an array of strings`);
     }
   }
-  if (value.gitActivity !== undefined && typeof value.gitActivity !== "boolean") throw new ConfigError("invalid supervision gitActivity: expected true or false");
+  if (value["gitActivity"] !== undefined && typeof value["gitActivity"] !== "boolean")
+    throw new ConfigError("invalid supervision gitActivity: expected true or false");
 };
 
 export const loadConfig = async (path = configPath(), home = homedir()): Promise<DoriConfig> => {
   const base = defaultConfig(home);
   const file = Bun.file(path);
   const raw = (await file.exists()) ? ((await file.json()) as Partial<DoriConfig>) : {};
+  checkRuntime(raw.runtime);
   checkSupervision(raw.supervision);
   const merged: DoriConfig = {
-    ...base, ...raw, guard: { ...base.guard, ...raw.guard }, hooks: { ...base.hooks, ...raw.hooks }, repoIdentities: repoIdentities(raw.repoIdentities),
+    ...base,
+    ...raw,
+    guard: { ...base.guard, ...raw.guard },
+    hooks: { ...base.hooks, ...raw.hooks },
+    repoIdentities: repoIdentities(raw.repoIdentities),
     // Only a string is a marker: null or false would quietly turn the goal check off, and an object would never show.
     goalMarker: typeof raw.goalMarker === "string" ? raw.goalMarker : base.goalMarker,
-    supervision: { ...base.supervision, ...raw.supervision, defaults: { ...base.supervision.defaults, ...raw.supervision?.defaults } },
+    // Only a nonnegative number is a wait: a string or null would otherwise end every launch at the first check.
+    startupWaitSeconds:
+      typeof raw.startupWaitSeconds === "number" &&
+      Number.isFinite(raw.startupWaitSeconds) &&
+      raw.startupWaitSeconds >= 0
+        ? raw.startupWaitSeconds
+        : base.startupWaitSeconds,
+    supervision: {
+      ...base.supervision,
+      ...raw.supervision,
+      defaults: { ...base.supervision.defaults, ...raw.supervision?.defaults },
+    },
   };
   for (const [name, value] of Object.entries({
     hungAfterMinutes: merged.supervision.hungAfterMinutes,
     staleAfterMinutes: merged.supervision.staleAfterMinutes,
     ...merged.supervision.defaults,
   })) {
-    if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ConfigError(`invalid supervision ${name}: expected a nonnegative number or null`);
+    if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0))
+      throw new ConfigError(`invalid supervision ${name}: expected a nonnegative number or null`);
   }
   for (const [key, budget] of Object.entries(merged.supervision.lanes ?? {})) {
     for (const [name, value] of Object.entries(budget)) {
-      if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ConfigError(`invalid supervision lanes.${key}.${name}: expected a nonnegative number or null`);
+      if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0))
+        throw new ConfigError(`invalid supervision lanes.${key}.${name}: expected a nonnegative number or null`);
     }
   }
   return {
     ...merged,
-    stateDir: expandHome(process.env.DORI_STATE_DIR ?? merged.stateDir, home),
+    stateDir: expandHome(process.env["DORI_STATE_DIR"] ?? merged.stateDir, home),
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),
-    leadPane: process.env.DORI_LEAD_PANE ?? merged.leadPane,
+    leadPane: process.env["DORI_LEAD_PANE"] ?? merged.leadPane,
   };
 };
 

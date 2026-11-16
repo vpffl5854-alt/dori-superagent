@@ -6,7 +6,11 @@ export type HttpRequest = {
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string | FormData | Uint8Array<ArrayBuffer>;
 };
-export type HttpResponse = { readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string };
+export type HttpResponse = {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+};
 export type Http = (req: HttpRequest) => Promise<HttpResponse>;
 
 export const fetchHttp: Http = async (req) => {
@@ -31,14 +35,21 @@ export class MessengerError extends Error {
 export class UnsafeMessageError extends Error {}
 
 export const guardText = (text: string): string => {
-  if (text.includes("$(")) throw new UnsafeMessageError("message text contains $( ; build messages as data, never through a shell string");
+  if (text.includes("$("))
+    throw new UnsafeMessageError("message text contains $( ; build messages as data, never through a shell string");
   return text;
 };
 
 export type RetryPolicy = { readonly attempts: number; readonly baseMs: number; readonly maxMs: number };
 export const DEFAULT_RETRY: RetryPolicy = { attempts: 5, baseMs: 1_000, maxMs: 60_000 };
 
-export const withBackoff = async (http: Http, clock: Clock, req: HttpRequest, policy: RetryPolicy = DEFAULT_RETRY, retryAfterFromBody?: (body: string) => number | undefined): Promise<HttpResponse> => {
+export const withBackoff = async (
+  http: Http,
+  clock: Clock,
+  req: HttpRequest,
+  policy: RetryPolicy = DEFAULT_RETRY,
+  retryAfterFromBody?: (body: string) => number | undefined,
+): Promise<HttpResponse> => {
   let last: HttpResponse | undefined;
   for (let attempt = 0; attempt < policy.attempts; attempt++) {
     last = await http(req);

@@ -2,3 +2,5 @@ node_modules
 .dori/
 *.tmp
 .DS_Store
+.omo/
+evidence/

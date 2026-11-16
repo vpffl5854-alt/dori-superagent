@@ -6,7 +6,7 @@ credentials out of it — logins happen once, inside the running container, and 
 volumes.
 
 The image builds for `linux/amd64` and `linux/arm64`; the builder picks your host
-architecture automatically. Every downloaded binary (gh, node, bun, herdr) is verified
+architecture automatically. Every downloaded binary (gh, node, bun, herdr or hc) is verified
 against a pinned sha256; npm packages and the harness are pinned by version and commit.
 
 ## Files
@@ -16,7 +16,8 @@ against a pinned sha256; npm packages and the harness are pinned by version and 
   and commit.
 - `examples/container/compose.yaml` — one `dori` service with named volumes for all
   state, sized like a small dev machine.
-- `examples/container/entrypoint.sh` — warms the herdr server, then runs the command.
+- `examples/container/entrypoint.sh` — starts the runtime's server (`hc server start`
+  when the image carries hc, `herdr server` otherwise), then runs the command.
 
 Ubuntu, not Alpine: bun and herdr need glibc.
 
@@ -33,6 +34,29 @@ auth untouched. `DORI_REF` pins the harness commit the image ships — grab the 
 want from the repo's commit history and pass it at build time when you want to move
 forward; when a tool moves, update its version and both sha256 build args (the values
 come from the tool's published checksums).
+
+### hc instead of herdr
+
+The image carries herdr by default. Build with `HC=1` to carry hc (herdr-core) in its
+place:
+
+```sh
+docker compose build --build-arg HC=1
+```
+
+The Dockerfile then downloads the `HC_VERSION` release tarball for your architecture,
+checks it against `HC_SHA256_AMD64` or `HC_SHA256_ARM64` (the values in the release's
+`manifest.json` at `https://releases.herdr.dev/core/<version>/`), installs it as
+`/usr/local/bin/herdr-core` with `hc` beside it, and writes `notes = false` to
+`~/.config/herdr-core/config.toml` so hc types nothing into a parent agent on its own.
+herdr is left out, so the harness finds hc as the one runtime on PATH and no `runtime`
+setting is needed. The entrypoint runs `hc server start` in place of `herdr server`.
+hc reads an agent's status only from the agent's own OSC 7501 report, so use an omo
+build that sends it; see [`runtime.md`](runtime.md).
+
+The default `DORI_REF` predates hc support: `dori status` in that image prints no
+`RUNTIME` line and the harness still drives herdr. Pass a `DORI_REF` that contains
+`src/runtime/` together with `HC=1`.
 
 ## First run
 
@@ -64,6 +88,13 @@ any number of exec sessions and they survive detach:
 docker exec -it dori herdr
 ```
 
+In an `HC=1` image the sessions are hc terminals, hosted by the hc core the same way:
+
+```sh
+docker exec -it dori hc ls      # the sessions, with their dori.* labels
+docker exec -it dori hc         # pick one and attach (ctrl+\ detaches)
+```
+
 ## What survives a restart
 
 All volume state, because nothing lives in the container filesystem. Running panes
@@ -88,15 +119,16 @@ the docker data root tens of gigabytes.
 ## When a VM is the simpler choice
 
 A container adds a layer over the host with no benefit for a single Dori: a plain VM
-(or bare metal box) with bun, herdr, omo, gh and agent-messenger installed gives the
+(or bare metal box) with bun, herdr or hc, omo, gh and agent-messenger installed gives the
 same layout, the same `dori up`, and one less abstraction when something breaks. Reach
 for the container when you want the recipe reproducible from a Dockerfile, want to run
 several Doris isolated on one host, or cannot hand out VMs.
 
 ## Acceptance (what this recipe is tested against)
 
-- `docker compose build` succeeds.
+- `docker compose build` succeeds, with and without `--build-arg HC=1`.
 - `dori up` inside the container opens the lead/duty/loop panes, visible through
-  `docker exec -it dori herdr`.
+  `docker exec -it dori herdr` (or the four terminals in `docker exec -it dori hc ls`
+  on an `HC=1` image).
 - A container restart keeps lanes, inbox and auth (all state is in volumes).
 - No credentials in the image or in any example file.

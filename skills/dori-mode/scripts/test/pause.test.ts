@@ -14,12 +14,22 @@ let world: World;
 beforeEach(() => {
   state = withState();
   world = newWorld();
-  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent_status: "idle" }];
+  world.panes = [{ pane_id: "w:p7", workspace_id: "w", agent: "omo", agent_status: "idle" }];
 });
 afterEach(() => state.done());
 
-const working: Lane = { key: "waiting-lane", title: "wait", thread: "chat:team/9", pane: "w:p7", brief: "/b.md", done: "merged acme/app#1", openedAt: new Date(T0).toISOString(), lastReplyAt: T0 };
-const deps = (ms: number) => depsFor(world, fakeClock(ms), state.dir, { hooks: { threadReply: ["notify", "{thread}", "{text}"] } });
+const working: Lane = {
+  key: "waiting-lane",
+  title: "wait",
+  thread: "chat:team/9",
+  pane: "w:p7",
+  brief: "/b.md",
+  done: "merged acme/app#1",
+  openedAt: new Date(T0).toISOString(),
+  lastReplyAt: T0,
+};
+const deps = (ms: number) =>
+  depsFor(world, fakeClock(ms), state.dir, { hooks: { threadReply: ["notify", "{thread}", "{text}"] } });
 const stored = async (): Promise<Lane | null> => deps(T0).registry.read(working.key);
 const paneSays = (...screens: string[]) => {
   world.screens = [...screens];
@@ -97,7 +107,11 @@ test("a not-done lane can be paused, and resume restores not-done and restarts t
 });
 
 test("resume of a working lane restarts the quiet clock: no nudge until nudgeAfterMin after the resume", async () => {
-  const paused: Lane = { ...working, status: "paused", history: [{ at: new Date(T0).toISOString(), status: "paused", note: "wait" }] };
+  const paused: Lane = {
+    ...working,
+    status: "paused",
+    history: [{ at: new Date(T0).toISOString(), status: "paused", note: "wait" }],
+  };
   await deps(T0).registry.write(paused);
   paneSays("❯ ", "Goal active\n❯ ");
   await resumeLane(deps(T0 + 90 * MIN), paused, "go");
@@ -140,8 +154,14 @@ test("one working tick between idle ones does not count as a resume", async () =
 
 test("pause and resume refuse lanes in other states with exit 2, and a lane with no pane is unverified", async () => {
   const claimed: Lane = { ...working, status: "done-claimed" };
-  expect(await pauseLane(deps(T0), claimed, "wait")).toMatchObject({ code: 2, lines: ["NOT_PAUSED waiting-lane is done-claimed, not working"] });
-  expect(await resumeLane(deps(T0), working, "go")).toMatchObject({ code: 2, lines: ["NOT_RESUMED waiting-lane is working, not paused"] });
+  expect(await pauseLane(deps(T0), claimed, "wait")).toMatchObject({
+    code: 2,
+    lines: ["NOT_PAUSED waiting-lane is done-claimed, not working"],
+  });
+  expect(await resumeLane(deps(T0), working, "go")).toMatchObject({
+    code: 2,
+    lines: ["NOT_RESUMED waiting-lane is working, not paused"],
+  });
   const paneless: Lane = { ...working, pane: undefined };
   expect((await pauseLane(deps(T0), paneless, "wait")).code).toBe(3);
   expect(sent(world)).toEqual([]);
@@ -178,4 +198,3 @@ test("a paused lane that goes idle and is woken again is reported again", async 
   expect((await freshnessTick(deps(T0 + 30 * MIN), "/home/test")).map((a) => a.kind)).toEqual(["working-while-paused"]);
   expect(statusOf((await stored()) as Lane)).toBe("paused");
 });
-

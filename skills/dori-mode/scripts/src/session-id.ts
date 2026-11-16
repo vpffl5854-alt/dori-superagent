@@ -1,10 +1,15 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Runner } from "./run.ts";
+import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { type ChosenRuntimes, type Runner, runtimesFor } from "./run.ts";
 
 export type Proc = { readonly pid: number; readonly ppid: number; readonly cmd: string };
-export type SessionHit = { readonly id: string; readonly via: "argv" | "child-env" | "start-time" | "none"; readonly pid?: number };
+export type SessionHit = {
+  readonly id: string;
+  readonly via: "argv" | "child-env" | "start-time" | "none";
+  readonly pid?: number;
+};
 
 const AGENT = /senpi\/dist\/bundle\/cli\.js|(^|\/)omo(\s|$)/;
 const ENV_ID = /(?:^|\s)PI_SESSION_ID=([0-9a-f-]{36})(?:\s|$)/;
@@ -29,14 +34,44 @@ const descendants = (table: readonly Proc[], root: number): Proc[] => {
   return out;
 };
 
-export const sessionDirFor = (sessionsDir: string, cwd: string): string => join(sessionsDir, `--${cwd.replace(/^\//, "").replace(/\//g, "-")}--`);
+export const sessionDirFor = (sessionsDir: string, cwd: string): string =>
+  join(sessionsDir, `--${cwd.replace(/^\//, "").replace(/\//g, "-")}--`);
 
-export type SessionDeps = { readonly run: Runner; readonly sessionsDir: string; readonly listDir?: (dir: string) => readonly string[] };
+/** The session id and creation time a session file name carries, or undefined for any other file. */
+export const sessionFileStart = (name: string): { readonly id: string; readonly at: number } | undefined => {
+  const m = SESSION_FILE.exec(name);
+  const at = m ? Date.parse(`${m[1]}:${m[2]}:${m[3]}.${m[4]}Z`) : Number.NaN;
+  return m?.[5] && !Number.isNaN(at) ? { id: m[5], at } : undefined;
+};
 
-export const resolveSession = async (pane: string, cwd: string, table: readonly Proc[], deps: SessionDeps): Promise<SessionHit> => {
-  const info = await deps.run(["herdr", "pane", "process-info", "--pane", pane]);
-  const shellPid = info.code === 0 ? Number((JSON.parse(info.out) as { result?: { process_info?: { shell_pid?: number } } }).result?.process_info?.shell_pid ?? 0) : 0;
-  const agent = shellPid ? descendants(table, shellPid).find((p) => AGENT.test(p.cmd) && !/\bmcp\b/.test(p.cmd)) : undefined;
+export type SessionDeps = {
+  readonly run: Runner;
+  /** Resolves the session's root process; built over `run` when absent (a stored ref needs no runtime choice). */
+  readonly rts?: ChosenRuntimes;
+  readonly sessionsDir: string;
+  readonly listDir?: (dir: string) => readonly string[];
+};
+
+/** The session's root process (herdr's shell, hc's terminal program); 0 when the runtime cannot say. */
+const rootPidOf = async (ref: SessionRef, deps: SessionDeps): Promise<number> => {
+  const rts = deps.rts ?? runtimesFor({}, process.env, deps.run);
+  try {
+    return (await rts.for(ref).probe(ref)).rootPid ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+export const resolveSession = async (
+  ref: SessionRef,
+  cwd: string,
+  table: readonly Proc[],
+  deps: SessionDeps,
+): Promise<SessionHit> => {
+  const rootPid = await rootPidOf(ref, deps);
+  // The root itself is a candidate: an agent run directly as the session's program has no shell above it.
+  const candidates = rootPid ? [...table.filter((p) => p.pid === rootPid), ...descendants(table, rootPid)] : [];
+  const agent = candidates.find((p) => AGENT.test(p.cmd) && !/\bmcp\b/.test(p.cmd));
   if (!agent) return { id: "", via: "none" };
   const argv = agent.cmd.split(/\s+/);
   const flagAt = argv.indexOf("--session");
@@ -49,11 +84,20 @@ export const resolveSession = async (pane: string, cwd: string, table: readonly 
   }
   const started = Date.parse((await deps.run(["ps", "-o", "lstart=", "-p", String(agent.pid)])).out);
   if (Number.isNaN(started)) return { id: "", via: "none", pid: agent.pid };
-  const list = deps.listDir ?? ((d: string) => { try { return readdirSync(d); } catch { return []; } });
-  const near = list(sessionDirFor(deps.sessionsDir, cwd)).flatMap((name) => {
-    const m = SESSION_FILE.exec(name);
-    const at = m ? Date.parse(`${m[1]}:${m[2]}:${m[3]}.${m[4]}Z`) : Number.NaN;
-    return m?.[5] && at >= started - 5_000 && at <= started + START_WINDOW_MS ? [{ id: m[5], at }] : [];
-  }).sort((a, b) => a.at - b.at);
+  const list =
+    deps.listDir ??
+    ((d: string) => {
+      try {
+        return readdirSync(d);
+      } catch {
+        return [];
+      }
+    });
+  const near = list(sessionDirFor(deps.sessionsDir, cwd))
+    .flatMap((name) => {
+      const hit = sessionFileStart(name);
+      return hit && hit.at >= started - 5_000 && hit.at <= started + START_WINDOW_MS ? [hit] : [];
+    })
+    .sort((a, b) => a.at - b.at);
   return near[0] ? { id: near[0].id, via: "start-time", pid: agent.pid } : { id: "", via: "none", pid: agent.pid };
 };

@@ -21,9 +21,26 @@ export class Telegram {
   ) {}
 
   async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
-    const res = await withBackoff(this.http, this.clock, { method: "POST", url: `${this.base}/bot${this.botToken}/${method}`, headers: { "Content-Type": "application/json" }, body: JSON.stringify(params) }, undefined, retryAfter);
-    const body = JSON.parse(res.body || "{}") as { ok?: boolean; result?: T; description?: string; error_code?: number };
-    if (!body.ok) throw new MessengerError(`telegram ${method}: ${body.description ?? res.status}`, body.error_code ?? res.status);
+    const res = await withBackoff(
+      this.http,
+      this.clock,
+      {
+        method: "POST",
+        url: `${this.base}/bot${this.botToken}/${method}`,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      },
+      undefined,
+      retryAfter,
+    );
+    const body = JSON.parse(res.body || "{}") as {
+      ok?: boolean;
+      result?: T;
+      description?: string;
+      error_code?: number;
+    };
+    if (!body.ok)
+      throw new MessengerError(`telegram ${method}: ${body.description ?? res.status}`, body.error_code ?? res.status);
     return body.result as T;
   }
 
@@ -32,12 +49,21 @@ export class Telegram {
   }
 
   async send(t: TgTarget, text: string, rich = false): Promise<number> {
-    const r = await this.call<{ message_id: number }>("sendMessage", { ...this.where(t), text: guardText(text), ...(rich ? { parse_mode: "HTML" } : {}) });
+    const r = await this.call<{ message_id: number }>("sendMessage", {
+      ...this.where(t),
+      text: guardText(text),
+      ...(rich ? { parse_mode: "HTML" } : {}),
+    });
     return r.message_id;
   }
 
   async edit(t: TgTarget, messageId: number, text: string, rich = false): Promise<void> {
-    await this.call("editMessageText", { chat_id: t.chatId, message_id: messageId, text: guardText(text), ...(rich ? { parse_mode: "HTML" } : {}) });
+    await this.call("editMessageText", {
+      chat_id: t.chatId,
+      message_id: messageId,
+      text: guardText(text),
+      ...(rich ? { parse_mode: "HTML" } : {}),
+    });
   }
 
   async typing(t: TgTarget): Promise<void> {
@@ -49,12 +75,19 @@ export class Telegram {
   }
 
   async createTopic(chatId: number | string, name: string): Promise<number> {
-    const r = await this.call<{ message_thread_id: number }>("createForumTopic", { chat_id: chatId, name: guardText(name).slice(0, 128) });
+    const r = await this.call<{ message_thread_id: number }>("createForumTopic", {
+      chat_id: chatId,
+      name: guardText(name).slice(0, 128),
+    });
     return r.message_thread_id;
   }
 
   async renameTopic(chatId: number | string, threadId: number, name: string): Promise<void> {
-    await this.call("editForumTopic", { chat_id: chatId, message_thread_id: threadId, name: guardText(name).slice(0, 128) });
+    await this.call("editForumTopic", {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      name: guardText(name).slice(0, 128),
+    });
   }
 
   async closeTopic(chatId: number | string, threadId: number): Promise<void> {

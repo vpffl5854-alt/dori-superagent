@@ -1,38 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { send } from "../src/harness.ts";
-import { omoScreenIdle } from "../src/herdr.ts";
-import { World } from "./fake.ts";
+import { send } from "../src/inbox.ts";
+import { World, href } from "./fake.ts";
 
 // Real omo screens captured with `herdr pane read --source recent`, sanitized (titles, costs, ids, paths replaced).
 const screen = (name: string) => Bun.file(join(import.meta.dir, "fixtures", "screens", `${name}.txt`)).text();
-
-describe("omoScreenIdle (#62: herdr reports an omo with live monitors as working)", () => {
-  test("idle input rule between turns, monitors still live: idle", async () => {
-    expect(omoScreenIdle(await screen("omo-idle-live-monitors"))).toBe(true);
-  });
-
-  test("a real turn shows esc to interrupt: not idle", async () => {
-    expect(omoScreenIdle(await screen("omo-turn"))).toBe(false);
-  });
-
-  test("doubt keeps it working: dialog, draft in the input, no box, unknown layout, empty read", async () => {
-    expect(omoScreenIdle(await screen("omo-dialog"))).toBe(false);
-    expect(omoScreenIdle(await screen("omo-draft"))).toBe(false);
-    expect(omoScreenIdle("$ ls\nREADME.md\n$ ")).toBe(false);
-    expect(omoScreenIdle("──────────\n❯\nsomething else\n")).toBe(false);
-    expect(omoScreenIdle("")).toBe(false);
-  });
-
-  test("an idle box with esc to interrupt anywhere on the screen is not idle", async () => {
-    expect(omoScreenIdle("── • Working (9s • esc to interrupt) ──\n" + (await screen("omo-idle-live-monitors")))).toBe(false);
-  });
-
-  test("an idle box scrolled up above other output is not the bottom of the screen: not idle", async () => {
-    const idle = await screen("omo-idle-live-monitors");
-    expect(omoScreenIdle(idle + "\n".repeat(2) + ["more", "output", "below", "the", "box"].join("\n"))).toBe(false);
-  });
-});
 
 describe("delivery to a pane herdr calls working", () => {
   function setup(screenText?: string) {
@@ -40,7 +12,7 @@ describe("delivery to a pane herdr calls working", () => {
     const d = w.deps();
     const lead = w.addPane("w1:p1", "working");
     lead.screen = screenText;
-    d.store.setRole("lead", "w1:p1");
+    d.store.setRole("lead", href("w1:p1"));
     return { w, d, lead };
   }
 

@@ -6,7 +6,7 @@ import type { Telegram } from "./telegram.ts";
 /** `message` for a new message, `edit` when the owner edited an earlier one. */
 export type TgInboundKind = "message" | "edit";
 
-export type TgMedia = { readonly kind: string; readonly fileId: string; readonly messageId: number };
+export type TgMedia = { readonly kind: string; readonly fileId: string; readonly messageId?: number };
 
 export type TgInbound = {
   readonly kind: TgInboundKind;
@@ -14,6 +14,8 @@ export type TgInbound = {
   readonly chat: number;
   readonly thread?: number;
   readonly updateId: number;
+  /** The Telegram message_id — the id a later edit replaces (edit lines print it as mid=). */
+  readonly messageId?: number;
   readonly from: number;
   readonly username?: string;
   readonly text?: string;
@@ -48,9 +50,10 @@ export type TgInboundStore = { load(): number; save(offset: number): void };
 /**
  * The inbound watch loop. Without `--loop` (loopMin <= 0) it is one-shot: a single
  * bounded poll, then it returns — scripts rely on that. With `--loop`, it re-polls
- * immediately after any poll that emitted a line (the 25s long-poll already returns
- * on arrival, so bursts deliver without waiting out the interval) and only sleeps
- * after an idle poll.
+ * immediately after any poll that returned updates — kept or gate-dropped alike, since
+ * more may be waiting behind that batch — and only sleeps after a truly empty poll
+ * (the 25s long-poll already returns on arrival, so bursts deliver without waiting
+ * out the interval).
  */
 export const telegramInboundLoop = async (
   tg: Telegram,
@@ -62,14 +65,15 @@ export const telegramInboundLoop = async (
   sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
 ): Promise<void> => {
   for (;;) {
-    let emitted = 0;
+    let polled: { inbound: readonly TgInbound[]; updates: number } | undefined;
     try {
-      emitted = (await pollTelegramInbound(tg, store, opts, emit)).length;
+      polled = await pollTelegramInbound(tg, store, opts, emit);
     } catch (e) {
       warn(e instanceof Error ? e.message : String(e));
     }
     if (loopMin <= 0) return; // one-shot: one bounded drain
-    if (emitted === 0) await sleep(loopMin * 60_000);
+    if (polled !== undefined && polled.updates > 0) continue; // more may be waiting behind this batch
+    await sleep(loopMin * 60_000);
   }
 };
 
@@ -84,7 +88,8 @@ export const fileTgInboundStore = (path: string): TgInboundStore => {
           // A corrupt offset must not silently replay the whole history.
           if (!warned) {
             warned = true;
-            console.error(`WARN telegram-offset at ${path} is unparseable (${n}); restarting from 0 (warned once)`);
+            // stdout like every other inbound WARN, so a monitor filtering stdout sees it.
+            console.log(`WARN telegram-offset at ${path} is unparseable (${n}); restarting from 0 (warned once)`);
           }
           return 0;
         }
@@ -94,8 +99,8 @@ export const fileTgInboundStore = (path: string): TgInboundStore => {
       }
     },
     save(offset: number): void {
-    // The state dir may not exist yet on a fresh install; without this the first save
-    // fails with ENOENT and the same update is re-printed every tick.
+      // The state dir may not exist yet on a fresh install; without this the first save
+      // fails with ENOENT and the same update is re-printed every tick.
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, String(offset));
     },
@@ -103,7 +108,12 @@ export const fileTgInboundStore = (path: string): TgInboundStore => {
 };
 
 type TgFile = { readonly file_id?: string };
-type TgUser = { readonly id: number; readonly is_bot?: boolean; readonly username?: string; readonly first_name?: string };
+type TgUser = {
+  readonly id: number;
+  readonly is_bot?: boolean;
+  readonly username?: string;
+  readonly first_name?: string;
+};
 type TgMessage = {
   readonly message_id?: number;
   readonly from?: TgUser;
@@ -112,6 +122,7 @@ type TgMessage = {
   readonly message_thread_id?: number;
   readonly text?: string;
   readonly caption?: string;
+  readonly location?: unknown;
   readonly voice?: TgFile;
   readonly audio?: TgFile;
   readonly video?: TgFile;
@@ -130,7 +141,8 @@ type TgUpdate = { readonly update_id: number; readonly message?: TgMessage; read
  * (replies included) resolves to no thread — callers treat it as topic 1 — and a
  * private-chat topic message keeps its thread.
  */
-const threadOf = (m: TgMessage): number | undefined => (m.is_topic_message === true ? m.message_thread_id ?? 1 : undefined);
+const threadOf = (m: TgMessage): number | undefined =>
+  m.is_topic_message === true ? (m.message_thread_id ?? 1) : undefined;
 
 /** The largest photo variant is the last array element; file ids are unique per size. */
 const mediaOf = (m: TgMessage): TgMedia | undefined => {
@@ -143,7 +155,9 @@ const mediaOf = (m: TgMessage): TgMedia | undefined => {
     ["document", m.document],
     ["photo", m.photo?.[m.photo.length - 1]],
   ];
-  for (const [kind, f] of kinds) if (f?.file_id !== undefined) return { kind, fileId: f.file_id, messageId: m.message_id ?? 0 };
+  for (const [kind, f] of kinds)
+    if (f?.file_id !== undefined)
+      return { kind, fileId: f.file_id, ...(m.message_id === undefined ? {} : { messageId: m.message_id }) };
   return undefined;
 };
 
@@ -162,8 +176,12 @@ export const pollTelegramInbound = async (
   store: TgInboundStore,
   opts: TgInboundOptions,
   emit: (inbound: TgInbound) => void = () => {},
-): Promise<TgInbound[]> => {
-  const updates = await tg.call<readonly TgUpdate[]>("getUpdates", { offset: store.load(), timeout: 25, allowed_updates: ["message", "edited_message"] });
+): Promise<{ inbound: readonly TgInbound[]; updates: number }> => {
+  const updates = await tg.call<readonly TgUpdate[]>("getUpdates", {
+    offset: store.load(),
+    timeout: 25,
+    allowed_updates: ["message", "edited_message"],
+  });
   const out: TgInbound[] = [];
   for (const u of updates) {
     const kind: TgInboundKind = u.edited_message === undefined ? "message" : "edit";
@@ -171,7 +189,11 @@ export const pollTelegramInbound = async (
     let keep = false;
     if (m?.from && !m.from.is_bot && m.from.id === opts.ownerId) {
       if (m.chat?.type === "private" && Number(m.chat.id) === opts.ownerId) keep = true;
-      else if ((m.chat?.type === "group" || m.chat?.type === "supergroup") && opts.groupChatId !== undefined && Number(m.chat.id) === opts.groupChatId) {
+      else if (
+        (m.chat?.type === "group" || m.chat?.type === "supergroup") &&
+        opts.groupChatId !== undefined &&
+        Number(m.chat.id) === opts.groupChatId
+      ) {
         // De-conflict: in a forum group the Dori only ever listens to its own topic.
         // General counts as topic 1 — including replies there, whose reply-root id in
         // message_thread_id is not a topic id.
@@ -183,11 +205,18 @@ export const pollTelegramInbound = async (
       store.save(u.update_id + 1);
       continue;
     }
+    // A live location arrives as a stream of edited_message updates carrying no new
+    // text; emitting one line per refresh would flood the consumer. Drop them.
+    if (kind === "edit" && m!.location !== undefined && m!.text === undefined && m!.caption === undefined) {
+      store.save(u.update_id + 1);
+      continue;
+    }
     const source = m!.chat!.type === "private" ? "dm" : "topic";
-    const thread = source === "topic" ? threadOf(m!) ?? 1 : threadOf(m!);
+    const thread = source === "topic" ? (threadOf(m!) ?? 1) : threadOf(m!);
     const inbound: TgInbound = {
       kind,
       source,
+      ...(m!.message_id === undefined ? {} : { messageId: m!.message_id }),
       chat: Number(m!.chat!.id),
       ...(thread === undefined ? {} : { thread }),
       updateId: u.update_id,
@@ -203,5 +232,5 @@ export const pollTelegramInbound = async (
     out.push(inbound);
     store.save(u.update_id + 1);
   }
-  return out;
+  return { inbound: out, updates: updates.length };
 };

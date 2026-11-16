@@ -34,24 +34,42 @@ export const isReportKind = (value: unknown): value is ReportKind =>
 // A question waits on the owner's answer, so it is blocked like a blocker: posted, never nudged.
 export const reportState = (kind: ReportKind): ProgressState => {
   switch (kind) {
-    case "milestone": return "running";
-    case "blocker": return "blocked";
-    case "question": return "blocked";
-    case "halted": return "halted";
-    case "done": return "done";
+    case "milestone":
+      return "running";
+    case "blocker":
+      return "blocked";
+    case "question":
+      return "blocked";
+    case "halted":
+      return "halted";
+    case "done":
+      return "done";
   }
 };
 
 // The printed line goes to terminals, so escape sequences and other control characters are dropped from it (a CR or
 // newline becomes one space); the journal keeps the raw text.
 export const reportLine = (report: Report): string =>
-  `[REPORT] ${report.key} | ${report.kind} | ${Bun.stripANSI(report.text).replace(/\s*[\r\n]+\s*/g, " ").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")}`;
+  `[REPORT] ${report.key} | ${report.kind} | ${Bun.stripANSI(report.text)
+    .replace(/\s*[\r\n]+\s*/g, " ")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern deliberately matches control characters to reject or strip them
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")}`;
 
 export const parseEvent = (line: string, key: string): LaneEvent => {
   const value: unknown = JSON.parse(line);
-  if (typeof value !== "object" || value === null || !("key" in value) || value.key !== key ||
-      !("at" in value) || typeof value.at !== "string" || !Number.isFinite(Date.parse(value.at)) ||
-      !("text" in value) || typeof value.text !== "string" || !value.text.trim() || !("type" in value)) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("key" in value) ||
+    value.key !== key ||
+    !("at" in value) ||
+    typeof value.at !== "string" ||
+    !Number.isFinite(Date.parse(value.at)) ||
+    !("text" in value) ||
+    typeof value.text !== "string" ||
+    !value.text.trim() ||
+    !("type" in value)
+  ) {
     throw new ReportError(`invalid report record for ${key}`);
   }
   const common = { key, at: value.at, text: value.text };
@@ -127,14 +145,25 @@ export class Reports {
     const workingAt = lastAt(/^\s*[^\w\n]*(?:Working|Running)\b/gim);
     const working = workingAt >= 0;
     // A failure counts only when no Working line follows it: an old error left on screen above a recovered lane is history.
-    const failed = lastAt(/compaction (?:failed|failure|error)|failed to compact|error (?:during|in) compaction|auto-?compaction failed/gi) > workingAt;
+    const failed =
+      lastAt(
+        /compaction (?:failed|failure|error)|failed to compact|error (?:during|in) compaction|auto-?compaction failed/gi,
+      ) > workingAt;
     const idle = /^\s*[❯>]\s*$/m.test(visible);
     const stale = now - Date.parse(progress.lastReport?.at ?? progress.lastEvent.at) >= staleAfterMs;
-    const state = failed || (idle && !working && stale) ? "stalled" : working && resumeOnWorking ? "running" : progress.state;
+    const state =
+      failed || (idle && !working && stale) ? "stalled" : working && resumeOnWorking ? "running" : progress.state;
     if (state === progress.state) return progress;
     const event: Activity = {
-      type: "activity", key, at: new Date(now).toISOString(), state,
-      text: failed ? "compaction failed" : state === "stalled" ? "idle prompt without Working or a fresh report" : "Working activity resumed",
+      type: "activity",
+      key,
+      at: new Date(now).toISOString(),
+      state,
+      text: failed
+        ? "compaction failed"
+        : state === "stalled"
+          ? "idle prompt without Working or a fresh report"
+          : "Working activity resumed",
     };
     this.append(event);
     return this.read(key);

@@ -2,15 +2,27 @@
 
 Run these once, in order. Stop and ask the owner wherever a step needs their choice or their hand.
 
-## 1. herdr
+## 1. herdr or hc
 
-herdr is the terminal multiplexer the Dori runs in. Every lane is a herdr tab, and herdr lets you read a pane, type into it and see which process runs there.
+The Dori runs its sessions on one of two runtimes. herdr is a terminal multiplexer: every lane is a herdr tab, and herdr lets you read a pane, type into it and see which process runs there. hc (herdr-core) keeps each lane in its own terminal, labelled with the lane key, and learns the agent's status only from the agent's own OSC 7501 report (recent omo builds send it).
+
+herdr:
 
 ```sh
 curl -fsSL https://herdr.dev/install.sh | sh
 herdr integration install pi        # or the integration for the agent you run in
 herdr --skill                       # load its skill unless it is already in your context
 ```
+
+hc:
+
+```sh
+curl -fsSL https://releases.herdr.dev/core/install.sh | sh
+mkdir -p ~/.config/herdr-core && echo 'notes = false' >> ~/.config/herdr-core/config.toml
+hc --skill                          # load its skill unless it is already in your context
+```
+
+`notes = false` stops hc from typing notes into a parent agent on its own, so the Dori's own sends are the only text that reaches a lane. With both installed, the Dori runs on hc unless `"runtime": "herdr"` is set in step 4; with only one on PATH, it uses that one.
 
 ## 2. Messenger
 
@@ -34,7 +46,7 @@ Ask which mode, give the trade-off as a short list, and wait for the choice:
   - It only sees channels it is invited to, within the scopes the app was granted.
   - It shows as an app, not a person.
 
-Record the choice. With a user token, set `DORI_SLACK_TOKEN` and `DORI_SLACK_COOKIE` (the `d` cookie from that member's browser session). With a bot token, set `DORI_SLACK_TOKEN` to the `xoxb-` token.
+Record the choice. With a user token, set `DORI_SLACK_TOKEN` and `DORI_SLACK_COOKIE` (the `d` cookie from that member's browser session). With a bot token, set `DORI_SLACK_TOKEN` to the `xoxb-` token. If you run a second Dori home on the same machine, also write that home's token to `slack-token` next to its `config.json` (`chmod 600`): `dori launch` then hands its lanes the file's path, never the token (see `dori launch` in `scripts.md`).
 
 ## 3. Bot
 
@@ -55,7 +67,7 @@ cd skills/dori-mode/scripts && bun install && bun link    # puts `dori` on PATH
 mkdir -p ~/.dori && cp ../references/config.example.json ~/.dori/config.json
 ```
 
-Then edit `~/.dori/config.json`: at least `leadPane` (your own herdr pane, from `herdr pane current`), `laneWorkspace`, `defaultCwd`, and the two hooks if you want lane threads updated automatically. `references/scripts.md` explains every field.
+Then edit `~/.dori/config.json`: at least `runtime` (`"herdr"` or `"hc"`), `leadPane` (your own session: `herdr pane current` on herdr, `echo $HC_TERMINAL_ID` on hc), `laneWorkspace` (a herdr workspace; on hc, the `dori.group` label the lane terminals get), `defaultCwd`, and the two hooks if you want lane threads updated automatically. `references/scripts.md` explains every field.
 
 ## 5. Monitors
 

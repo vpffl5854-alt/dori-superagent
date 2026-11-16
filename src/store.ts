@@ -1,134 +1,50 @@
-import { mkdirSync, readdirSync, existsSync, appendFileSync, readFileSync, writeFileSync, renameSync, rmSync, linkSync, statSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  appendQueue,
+  forwardOf,
+  forwardPending,
+  inboxFile,
+  inboxRefs,
+  mergeForwarded,
+  readQueue,
+  writeQueue,
+} from "./inbox-files.ts";
+import { takeInboxLock } from "./inbox-lock.ts";
+import { refFromText, refText, sameSession } from "./refs.ts";
+import type { SessionRef } from "./runtime/types.ts";
+import {
+  KEEP_RUNS,
+  KEY_RE,
+  type Item,
+  type Lane,
+  type LoopRun,
+  type QueuedMessage,
+  type ReviewReceipt,
+  type Role,
+} from "./store-types.ts";
 
-export type LaneStatus = "working" | "waiting" | "ready" | "done" | "lost";
+export type { HostLoad } from "./store-types.ts";
 
-export type Lane = {
-  key: string;
-  paneId: string;
-  tabId: string;
-  brief: string;
-  cwd: string;
-  status: LaneStatus;
-  createdAt: number;
-  lastActivityAt: number;
-  nudges: number;
-  final?: { text: string; evidence: string[]; at: number };
-  log: { at: number; kind: "start" | "report" | "ready" | "nudge" | "done" | "lost"; text: string }[];
-};
+/** A lane file as any binary wrote it: one from before runtimes existed has no `sessionRef`. */
+type StoredLane = Omit<Lane, "sessionRef"> & { sessionRef?: SessionRef };
 
-export type Role = "lead" | "duty";
-
-/**
- * A delivery that failed after the message may have reached the pane (#89). `typed`: the text is in the pane's input
- * and only Enter is retried; `agent` and `pgid` record which agent it was typed into (#108, see AgentIdentity).
- * `ambiguous`: it may or may not have arrived; it is held, never resent automatically.
- */
-export type DeliveryAttempt = { at: number; state: "typed" | "ambiguous"; detail?: string; agent?: string; pgid?: number };
-
-/** A flush lock from another host (or an unreadable one) older than this is taken over; on this host only a dead pid frees it (#108). */
-export const INBOX_LOCK_STALE_MS = 60_000;
-
-export type QueuedMessage = { at: number; from: string; text: string; attempt?: DeliveryAttempt };
-
-export type ReviewReceipt = {
-  pr: string;
-  sha: string;
-  verdict: "CLEAR" | "BLOCK";
-  model: string;
-  at: number;
-  summary: string;
-};
-
-export type ItemStatus = "open" | "running" | "done" | "dropped";
-
-/** One backlog entry. Its id is the lane key the hourly loop starts it under. */
-export type Item = {
-  id: string;
-  title: string;
-  brief: string;
-  cwd: string;
-  priority: number;
-  status: ItemStatus;
-  decision?: string;
-  askedAt?: number;
-  remindedAt?: number;
-  attempts: number;
-  startFailures?: number;
-  source?: string;
-  createdAt: number;
-  updatedAt: number;
-  log: { at: number; kind: "add" | "start" | "reopen" | "done" | "drop" | "ask" | "remind" | "decide"; text: string }[];
-};
-
-export type HostLoad = { load1: number; cores: number; memFreePct: number };
-
-export type LoopRun = {
-  at: number;
-  skipped?: string;
-  status?: {
-    lanes: number;
-    maxLanes: number;
-    adhoc: string[];
-    items: { open: number; decide: number; running: number };
-    host: HostLoad;
-  };
-  synced: string[];
-  findings: string[];
-  started: string[];
-  held: string[];
-  asked: string[];
-};
-
-export const KEEP_RUNS = 168;
-export const KEY_RE = /^[a-z][a-z0-9-]{1,40}$/;
-/** Role names are send targets, and resolveTarget tries roles first, so a lane with one of these keys could never be reached. */
-export const RESERVED_KEYS: readonly Role[] = ["lead", "duty"];
-/** Refusal text for a reserved lane key, or undefined. Keys are lowercase-only (KEY_RE), so the exact match is the whole check. */
-export const reservedKey = (key: string): string | undefined =>
-  (RESERVED_KEYS as readonly string[]).includes(key) ? `lane key "${key}" is reserved for the ${key} role` : undefined;
+/** Reads a record without `sessionRef` as the herdr pane it names; the same input always gives the same lane. */
+const upgrade = (raw: StoredLane): Lane =>
+  raw.sessionRef !== undefined
+    ? (raw as Lane)
+    : { ...raw, sessionRef: { runtime: "herdr", id: raw.paneId, ...(raw.tabId ? { container: raw.tabId } : {}) } };
 
 const checkedId = (id: string): string => {
   if (!KEY_RE.test(id)) throw new Error(`invalid id ${JSON.stringify(id)}: must match ${KEY_RE}`);
   return id;
 };
 
-const readOrUndefined = (path: string): string | undefined => {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-};
-
-const pidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-/** An unreadable lock (a holder that died between create and write) is judged by the file's age. */
-function lockStale(path: string, content: string, now: number): boolean {
-  let lock: { pid?: unknown; host?: unknown; at?: unknown } = {};
-  try {
-    lock = JSON.parse(content) as typeof lock;
-  } catch {
-    // fall through to the file's mtime
-  }
-  // On this host the pid decides: a live holder keeps its lock however long a herdr call takes, or a second flush
-  // would deliver the same batch again. The age rule is only for locks from another host or locks that can't be read.
-  if (lock.host === hostname() && typeof lock.pid === "number") return !pidAlive(lock.pid);
-  const at = typeof lock.at === "number" ? lock.at : (() => { try { return statSync(path).mtimeMs; } catch { return now; } })();
-  return now - at > INBOX_LOCK_STALE_MS;
-}
-
 export class Store {
   constructor(readonly root: string = process.env["DORI_HOME"] ?? join(homedir(), ".dori")) {
-    for (const d of ["lanes", "inbox", "briefs", "receipts", "backlog", "loop/runs", "duty"]) mkdirSync(join(root, d), { recursive: true });
+    for (const d of ["lanes", "inbox", "briefs", "receipts", "backlog", "loop/runs", "duty"])
+      mkdirSync(join(root, d), { recursive: true });
   }
 
   private readJson<T>(path: string): T | undefined {
@@ -142,101 +58,89 @@ export class Store {
   }
 
   lane(key: string): Lane | undefined {
-    return this.readJson<Lane>(join(this.root, "lanes", `${key}.json`));
+    const raw = this.readJson<StoredLane>(join(this.root, "lanes", `${key}.json`));
+    return raw && upgrade(raw);
   }
 
+  /** Writes `paneId`/`tabId` from `sessionRef` beside it, so an older binary still reads the record. */
   saveLane(lane: Lane): void {
-    this.writeJson(join(this.root, "lanes", `${lane.key}.json`), lane);
+    const { id, container } = lane.sessionRef;
+    this.writeJson(join(this.root, "lanes", `${lane.key}.json`), { ...lane, paneId: id, tabId: container ?? "" });
   }
 
   lanes(): Lane[] {
     return readdirSync(join(this.root, "lanes"))
       .filter((f) => f.endsWith(".json"))
-      .map((f) => this.readJson<Lane>(join(this.root, "lanes", f)))
-      .filter((l): l is Lane => l !== undefined)
+      .map((f) => this.readJson<StoredLane>(join(this.root, "lanes", f)))
+      .filter((l): l is StoredLane => l !== undefined)
+      .map(upgrade)
       .sort((a, b) => a.createdAt - b.createdAt || a.key.localeCompare(b.key));
   }
 
-  laneByPane(paneId: string): Lane | undefined {
-    return this.lanes().find((l) => l.paneId === paneId && l.status !== "done");
+  laneBySession(ref: SessionRef): Lane | undefined {
+    return this.lanes().find((l) => sameSession(l.sessionRef, ref) && l.status !== "done");
   }
 
-  roles(): Partial<Record<Role, string>> {
-    return this.readJson(join(this.root, "roles.json")) ?? {};
+  /** roles.json holds ref strings (refText), so an older binary still parses it; a bare value is a herdr pane. */
+  roles(): Partial<Record<Role, SessionRef>> {
+    const raw = this.readJson<Partial<Record<Role, string>>>(join(this.root, "roles.json")) ?? {};
+    return Object.fromEntries(Object.entries(raw).map(([role, text]) => [role, refFromText(text)]));
   }
 
-  setRole(role: Role, paneId: string): void {
-    this.writeJson(join(this.root, "roles.json"), { ...this.roles(), [role]: paneId });
+  setRole(role: Role, ref: SessionRef): void {
+    const raw = this.readJson<Partial<Record<Role, string>>>(join(this.root, "roles.json")) ?? {};
+    this.writeJson(join(this.root, "roles.json"), { ...raw, [role]: refText(ref) });
   }
 
   briefPath(key: string): string {
     return join(this.root, "briefs", `${key}.md`);
   }
 
-  inboxPath(paneId: string): string {
-    return join(this.root, "inbox", `${paneId.replaceAll(":", "_")}.jsonl`);
+  inboxPath(ref: SessionRef): string {
+    return inboxFile(this.root, ref);
   }
 
-  enqueue(paneId: string, msg: QueuedMessage): void {
-    appendFileSync(this.inboxPath(paneId), JSON.stringify(msg) + "\n");
+  /** Appends to the inbox of the session `ref` was forwarded to, if it was. */
+  enqueue(ref: SessionRef, msg: QueuedMessage): void {
+    appendQueue(this.inboxPath(this.forwardOf(ref) ?? ref), msg);
   }
 
-  queued(paneId: string): QueuedMessage[] {
-    const p = this.inboxPath(paneId);
-    if (!existsSync(p)) return [];
-    return readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as QueuedMessage);
+  queued(ref: SessionRef): QueuedMessage[] {
+    return readQueue(this.inboxPath(ref));
   }
 
-  saveInbox(paneId: string, msgs: readonly QueuedMessage[]): void {
-    writeFileSync(this.inboxPath(paneId), msgs.map((m) => JSON.stringify(m) + "\n").join(""));
+  saveInbox(ref: SessionRef, msgs: readonly QueuedMessage[]): void {
+    writeQueue(this.inboxPath(ref), msgs);
+  }
+
+  /** The session this one's inbox was forwarded to by a migration (its `.forward` marker), or undefined. */
+  forwardOf(ref: SessionRef): SessionRef | undefined {
+    return forwardOf(this.root, ref);
+  }
+
+  /** True when an old inbox forwarded into `ref` still holds entries. */
+  forwardPending(ref: SessionRef): boolean {
+    return forwardPending(this.root, ref);
+  }
+
+  /** Merges old inboxes forwarded into `ref` into its inbox; call it under ref's inbox lock. */
+  mergeForwarded(ref: SessionRef): void {
+    mergeForwarded(this.root, ref);
   }
 
   /**
-   * Takes the pane's inbox lock (`<inbox>.lock`, created O_EXCL, holding pid, host and time) and returns its release,
+   * Takes the session's inbox lock (`<inbox>.lock`, created O_EXCL, holding pid, host and time) and returns its release,
    * or undefined while another flush holds it. A lock whose pid is dead on this host, or one from another host (or
    * unreadable) older than INBOX_LOCK_STALE_MS, is taken over: it is renamed aside first, and when what was renamed is not the lock judged stale (another
    * process took it over in between), it is put back and the lock counts as held.
    */
-  lockInbox(paneId: string, now: number): (() => void) | undefined {
-    const path = `${this.inboxPath(paneId)}.lock`;
-    const mine = JSON.stringify({ pid: process.pid, host: hostname(), at: now });
-    for (let tries = 0; tries < 2; tries++) {
-      try {
-        writeFileSync(path, mine, { flag: "wx" });
-        return () => {
-          if (readOrUndefined(path) === mine) rmSync(path, { force: true });
-        };
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
-      const seen = readOrUndefined(path);
-      if (seen === undefined) continue;
-      if (!lockStale(path, seen, now)) return undefined;
-      const aside = `${path}.${process.pid}.stale`;
-      try {
-        renameSync(path, aside);
-      } catch {
-        continue;
-      }
-      if (readOrUndefined(aside) !== seen) {
-        try {
-          linkSync(aside, path);
-        } catch {
-          // a third process holds the lock now; either way it is not ours
-        }
-        rmSync(aside, { force: true });
-        return undefined;
-      }
-      rmSync(aside, { force: true });
-    }
-    return undefined;
+  lockInbox(ref: SessionRef, now: number): (() => void) | undefined {
+    return takeInboxLock(`${this.inboxPath(ref)}.lock`, now);
   }
 
-  inboxPanes(): string[] {
-    return readdirSync(join(this.root, "inbox"))
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => f.slice(0, -".jsonl".length).replaceAll("_", ":"))
-      .filter((p) => this.queued(p).length > 0);
+  /** Sessions with queued messages. */
+  inboxPanes(): SessionRef[] {
+    return inboxRefs(this.root).filter((r) => this.queued(r).length > 0);
   }
 
   private receiptPath(pr: string, sha: string): string {
@@ -279,6 +183,11 @@ export class Store {
     return join(this.root, "loop", name);
   }
 
+  /** The single-instance lock of the hourly loop (`loop/lock`) or of the duty loop (`duty/lock`). */
+  lockPath(of: "loop" | "duty"): string {
+    return join(this.root, of, "lock");
+  }
+
   /** The kill switch of the hourly loop (`loop/stop`) or of the duty loop (`duty/stop`). */
   stop(of: "loop" | "duty" = "loop"): { at: number; reason: string } | undefined {
     return this.readJson(join(this.root, of, "stop"));
@@ -306,12 +215,16 @@ export class Store {
     }
     this.writeJson(join(dir, name), run);
     this.writeJson(this.loopPath("last-run.json"), run);
-    const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .sort();
     for (const f of files.slice(0, Math.max(0, files.length - KEEP_RUNS))) rmSync(join(dir, f), { force: true });
     return name;
   }
 
   runs(): string[] {
-    return readdirSync(this.loopPath("runs")).filter((f) => f.endsWith(".json")).sort();
+    return readdirSync(this.loopPath("runs"))
+      .filter((f) => f.endsWith(".json"))
+      .sort();
   }
 }
