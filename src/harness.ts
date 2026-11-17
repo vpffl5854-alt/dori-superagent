@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
@@ -15,7 +15,9 @@ import { Telemetry, type Usage } from "./telemetry.ts";
 export { KEY_RE, reservedKey };
 
 const PROMPTS = join(import.meta.dir, "..", "prompts");
-const CLI = resolve(import.meta.dir, "cli.ts");
+// The running entry point, not a path beside this file: from the bundled `bin/dori.js` a `cli.ts` beside it does not
+// exist, and every lane that ran a `dori` command from its rules failed on module-not-found (2026-11-18).
+const SELF = Bun.main;
 
 export type Deps = {
   readonly store: Store;
@@ -52,7 +54,7 @@ export const defaultDeps = (): Deps => {
     exec: spawnExec,
     now: Date.now,
     agentCmd: process.env["DORI_AGENT_CMD"] ?? "omo",
-    doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(CLI)}`,
+    doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(SELF)}`,
     host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: memFreePct() }),
     usage: new Telemetry(store.root),
   };
