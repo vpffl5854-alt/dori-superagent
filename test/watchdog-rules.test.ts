@@ -137,6 +137,12 @@ describe("watchdog repeat rule", () => {
     expect(repeatedScratch(screen(...frame, "❯"))).toBeUndefined();
   });
 
+  test("an ellipsis the pane prints where it cut a line is not a command", () => {
+    const dots = Array.from({ length: 8 }, () => "...");
+    expect(repeatedScratch(screen(...dots))).toBeUndefined();
+    expect(repeatedScratch(screen(...dots, "…"))).toBeUndefined();
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");
