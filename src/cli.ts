@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 import { runBacklog, runDuty, runLoop } from "./cli-loops.ts";
+import { runWatchdog } from "./cli-watchdog.ts";
 import { status, up } from "./cli-up.ts";
 import { done, ready, report, startLane } from "./lanes.ts";
 import { mergeGate, review } from "./gate.ts";
@@ -25,6 +26,7 @@ const COMMANDS = new Set([
   "send",
   "inbox",
   "duty",
+  "watchdog",
   "review",
   "merge",
   "done",
@@ -121,6 +123,8 @@ export async function main(argv: readonly string[], d: Deps = defaultDeps()): Pr
     }
     case "duty":
       return runDuty(d, a, x);
+    case "watchdog":
+      return runWatchdog(d, a, x);
     case "loop":
       return runLoop(d, a, x);
     case "backlog":

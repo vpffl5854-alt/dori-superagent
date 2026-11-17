@@ -17,6 +17,9 @@ export const USAGE = `dori - a proactive multi-session harness on herdr or hc + 
   dori duty [--once] [--interval SECONDS]     flush inboxes, nudge idle lanes, escalate, detect lost lanes;
                                               close lanes past 1.5x their budget or looping on one scratch file
   dori duty stop [--text WHY] | resume | status   kill switch
+  dori watchdog [--once] [--limit-min N] [--interval S]
+                                              independent hard limit (launchd: com.dori.watchdog): close every lane
+                                              pane older than N minutes (default 60), whatever duty is doing
   dori loop [--once] [--interval S] [--max-lanes N] [--max-starts N] [--max-load L] [--force]
                                               hourly: sync backlog, audit missed work, start the next item, ask decisions
   dori loop stop [--text WHY] | resume | status   kill switch and last run

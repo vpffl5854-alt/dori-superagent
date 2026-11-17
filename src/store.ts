@@ -184,7 +184,7 @@ export class Store {
   }
 
   /** The single-instance lock of the hourly loop (`loop/lock`) or of the duty loop (`duty/lock`). */
-  lockPath(of: "loop" | "duty"): string {
+  lockPath(of: "loop" | "duty" | "watchdog"): string {
     return join(this.root, of, "lock");
   }
 
