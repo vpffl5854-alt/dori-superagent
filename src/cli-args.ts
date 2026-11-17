@@ -4,7 +4,9 @@ export const USAGE = `dori - a proactive multi-session harness on herdr or hc + 
 
   dori up [--cwd DIR]                         open lead, duty, duty loop and hourly loop sessions
   dori role <lead|duty> [REF]                 register a session (w1:p3, herdr:w1:p3, hc:t7) as lead or duty (default: this one)
-  dori start <key> --brief FILE [--cwd DIR]   open a lane: new tab, omo session, brief + lane rules
+  dori start <key> --brief FILE [--cwd DIR] [--budget-min N]
+                                              open a lane: new tab, omo session, brief + lane rules;
+                                              the duty watchdog closes it at 1.5x N minutes (default 40)
   dori report <key> --text T [--status working|waiting]
   dori ready <key> --text T --evidence LINK [--evidence LINK ...]
   dori send <lead|duty|key|pane> --text T     deliver now, or queue until the pane's agent is idle
@@ -12,7 +14,8 @@ export const USAGE = `dori - a proactive multi-session harness on herdr or hc + 
   dori inbox list <pane|role|key>             queued entries: index, state (queued|typed|held), sender, time, first 60 chars
   dori inbox ack <pane|role|key> <index>      drop a held entry: it did reach the pane
   dori inbox resend <pane|role|key> <index>   release a held entry: the next flush delivers it
-  dori duty [--once] [--interval SECONDS]     flush inboxes, nudge idle lanes, escalate, detect lost lanes
+  dori duty [--once] [--interval SECONDS]     flush inboxes, nudge idle lanes, escalate, detect lost lanes;
+                                              close lanes past 1.5x their budget or looping on one scratch file
   dori duty stop [--text WHY] | resume | status   kill switch
   dori loop [--once] [--interval S] [--max-lanes N] [--max-starts N] [--max-load L] [--force]
                                               hourly: sync backlog, audit missed work, start the next item, ask decisions

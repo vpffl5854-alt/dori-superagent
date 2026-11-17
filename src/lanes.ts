@@ -9,16 +9,20 @@ import { refText } from "./refs.ts";
 import { groupId } from "./runtime/group.ts";
 import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
+import { DEFAULT_BUDGET_MIN } from "./watchdog-rules.ts";
 
 export async function startLane(
   d: Deps,
   key: string,
   briefFile: string,
-  opts: { cwd?: string; group?: string } = {},
+  opts: { cwd?: string; group?: string; budgetMin?: number } = {},
 ): Promise<Lane> {
   if (!KEY_RE.test(key)) throw new Refusal(`lane key must match ${KEY_RE}`);
   const reserved = reservedKey(key);
   if (reserved) throw new Refusal(reserved);
+  const budgetMin = opts.budgetMin ?? DEFAULT_BUDGET_MIN;
+  if (!(Number.isFinite(budgetMin) && budgetMin > 0))
+    throw new Refusal("--budget-min must be a positive number of minutes");
   const existing = d.store.lane(key);
   if (existing && existing.status !== "done" && existing.status !== "lost")
     throw new Refusal(`lane ${key} is already open in ${refText(existing.sessionRef)}`);
@@ -50,6 +54,7 @@ export async function startLane(
     tabId: ref.container ?? "",
     brief: briefPath,
     cwd,
+    budgetMin,
     status: "working",
     createdAt: now,
     lastActivityAt: now,

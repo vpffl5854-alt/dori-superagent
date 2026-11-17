@@ -9,7 +9,7 @@ import { href } from "./fake.ts";
 describe("duty loop", () => {
   test("nudges an idle lane at 10 and 20 minutes, escalates at 40, and ignores WAITING lanes", async () => {
     const { w, d, lead, brief } = setup();
-    const lane = await startLane(d, "quiet", brief, { group: "w1" });
+    const lane = await startLane(d, "quiet", brief, { group: "w1", budgetMin: 600 });
     const pane = w.panes.get(lane.paneId)!;
     pane.status = "idle";
     const at = async (min: number) => {

@@ -1,4 +1,5 @@
 import type { SessionRef } from "./runtime/types.ts";
+import type { WatchdogFinding } from "./watchdog-rules.ts";
 
 export type LaneStatus = "working" | "waiting" | "ready" | "done" | "lost";
 
@@ -7,6 +8,8 @@ export type LaneStatus = "working" | "waiting" | "ready" | "done" | "lost";
  * beside it (the ref's id and container) so an older binary still reads the file. `migratedFrom`: the sessions it ran in
  * before a `dori migrate`. `migration`: a handover is in progress, and the duty loop leaves the record alone.
  * `sessionPath`: the agent's own session file, when its command records one; `dori migrate --resume` needs it.
+ * `budgetMin`: the minutes `dori start --budget-min` declared; the duty watchdog closes the lane at 1.5x it.
+ * `watchdog`: the finding that closed the lane, so the duty loop never closes the same lane twice.
  */
 export type Lane = {
   key: string;
@@ -18,6 +21,8 @@ export type Lane = {
   tabId: string;
   brief: string;
   cwd: string;
+  budgetMin?: number;
+  watchdog?: WatchdogFinding & { at: number };
   status: LaneStatus;
   createdAt: number;
   lastActivityAt: number;

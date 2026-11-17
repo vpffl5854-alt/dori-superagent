@@ -115,12 +115,12 @@ describe("hourly loop", () => {
 
   test("audit flags stale, long-waiting, unclosed-READY and vanished lanes without touching them", async () => {
     const { w, d, brief, tick, destructive } = setup();
-    const quiet = await startLane(d, "quiet", brief, { group: "w1" });
-    const busy = await startLane(d, "busy", brief, { group: "w1" });
+    const quiet = await startLane(d, "quiet", brief, { group: "w1", budgetMin: 600 });
+    const busy = await startLane(d, "busy", brief, { group: "w1", budgetMin: 600 });
     const wait = await startLane(d, "wait-ci", brief, { group: "w1" });
     const fin = await startLane(d, "finished", brief, { group: "w1" });
-    const gone = await startLane(d, "vanished", brief, { group: "w1" });
-    await startLane(d, "fresh", brief, { group: "w1" });
+    const gone = await startLane(d, "vanished", brief, { group: "w1", budgetMin: 600 });
+    await startLane(d, "fresh", brief, { group: "w1", budgetMin: 600 });
     await report(d, "wait-ci", "WAITING: CI on acme/app#3", "waiting");
     await ready(d, "finished", "done", ["https://github.com/acme/app/pull/3"]);
     for (const l of [quiet, wait, fin]) w.panes.get(l.paneId)!.status = "idle";

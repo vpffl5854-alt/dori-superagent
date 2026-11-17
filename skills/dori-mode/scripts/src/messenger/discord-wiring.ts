@@ -57,10 +57,9 @@ export const mediaStore = (stateDir: string): MediaStore => {
       writeFileSync(path, bytes);
       if (!type.startsWith("video/")) return [path];
       const frame = `${base}.png`;
-      const ff = await run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", path, "-frames:v", "1", frame],
-        { timeoutMs: 20_000 },
-      );
+      const ff = await run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", path, "-frames:v", "1", frame], {
+        timeoutMs: 20_000,
+      });
       return ff.code === 0 && existsSync(frame) ? [frame, path] : [path];
     },
   };

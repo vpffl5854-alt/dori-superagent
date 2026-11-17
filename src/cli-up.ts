@@ -78,7 +78,7 @@ export function status(d: Deps): void {
     const last = l.log.at(-1);
     const age = Math.round((d.now() - l.lastActivityAt) / 60_000);
     console.log(
-      `${l.key.padEnd(24)} ${l.status.padEnd(8)} ${l.sessionRef.runtime.padEnd(5)} ${refText(l.sessionRef).padEnd(14)} active ${age}m ago  ${last ? `${last.kind}: ${last.text.slice(0, 60)}` : ""}`,
+      `${l.key.padEnd(24)} ${l.status.padEnd(8)} ${l.sessionRef.runtime.padEnd(5)} ${refText(l.sessionRef).padEnd(14)} budget ${l.budgetMin ?? "-"}m active ${age}m ago  ${last ? `${last.kind}: ${last.text.slice(0, 60)}` : ""}`,
     );
   }
 }

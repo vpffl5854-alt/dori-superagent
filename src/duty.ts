@@ -5,6 +5,7 @@ import { flushInbox, sendOrThrow, tellLead } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
 import { refText } from "./refs.ts";
 import type { Lane } from "./store-types.ts";
+import { tripWatchdog, watchdogFinding } from "./watchdog.ts";
 
 export const NUDGE_MINUTES = [10, 20, 40] as const;
 
@@ -54,6 +55,12 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
       const lane = d.store.lane(listed.key);
       if (lane === undefined || !watched(lane) || lane.sessionRef.id !== listed.sessionRef.id) continue;
       const now = d.now();
+      const finding = await watchdogFinding(d, lane);
+      if (finding) {
+        const notice = (await tripWatchdog(d, lane, finding)).notice;
+        events.push({ lane: lane.key, action: `watchdog-${finding.rule}`, detail: notice });
+        continue;
+      }
       if (st === "gone") {
         lane.status = "lost";
         lane.log.push({ at: now, kind: "lost", text: "pane disappeared without READY" });
