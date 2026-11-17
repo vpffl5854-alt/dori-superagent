@@ -42,10 +42,11 @@ test("splitForDiscord leaves a message under the limit whole", () => {
   expect(splitForDiscord("  짧은 답  ")).toEqual(["짧은 답"]);
 });
 
-test("answerText drops the routing line only when an answer follows it", () => {
+test("answerText never posts the routing line, and needs an answer after it", () => {
   const content = (text: string) => ({ content: [{ type: "text", text }] });
   expect(answerText(content("I read this as a test - answer it.\n\n답입니다."))).toBe("답입니다.");
-  expect(answerText(content("I read this as a test - answer it."))).toBe("I read this as a test - answer it.");
+  // The routing line alone is the pane's own note: posting it puts English in a Korean room.
+  expect(answerText(content("I read this as a test - answer it."))).toBeUndefined();
   expect(answerText({ content: [{ type: "tool_use", id: "t" }] })).toBeUndefined();
 });
 

@@ -51,9 +51,10 @@ export const answerText = (message: unknown): string | undefined => {
     .join("\n")
     .trim();
   if (!text) return undefined;
+  // The routing line is the pane's own note, never the room's answer: an answer that is nothing but that line is no
+  // answer, and posting it puts an English sentence in a Korean room.
   if (!ROUTING_LINE.test(text.split("\n")[0] ?? "")) return text;
-  const rest = text.split("\n").slice(1).join("\n").trim();
-  return rest || text;
+  return text.split("\n").slice(1).join("\n").trim() || undefined;
 };
 
 /** The last assistant answer in a session log written after `fromOffset`, or undefined when there is none yet. */
