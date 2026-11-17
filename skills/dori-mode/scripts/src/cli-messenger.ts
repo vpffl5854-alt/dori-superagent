@@ -1,7 +1,7 @@
 /** dori send, presence, inbound and transcribe: the messengers. */
 import { type Command, die, envSlackToken, every, slackAuth } from "./cli-context.ts";
 import type { DoriConfig } from "./config.ts";
-import { formatInbound } from "./messenger/discord-inbound.ts";
+import { formatInbound } from "./messenger/discord-message.ts";
 import { DiscordInbound } from "./messenger/discord-inbound.ts";
 import { startDiscordReplies, sessionPathFor } from "./messenger/discord-answers.ts";
 import {
@@ -152,7 +152,11 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
   const dcToken = discordToken();
   const me = await discordWhoAmI(dcToken);
   surviveCrashes("discord inbound");
-  const replies = startDiscordReplies(new Discord(fetchHttp, realClock, dcToken), stateDir, config);
+  const replies = startDiscordReplies(
+    new Discord(fetchHttp, realClock, dcToken),
+    stateDir,
+    config.discordSelfId ? config : { ...config, discordSelfId: me },
+  );
   const inbound = new DiscordInbound(
     () => openGatewaySocket(),
     dcToken,
@@ -160,6 +164,11 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
     me,
     (i) => {
       console.log(formatInbound(i));
+      // The lead answers the human, and a bot only when it called Dori; other bot posts are logged and left alone.
+      if (i.authorIsBot) {
+        void replies.enqueueBot(i);
+        return;
+      }
       void sessionPathFor(config.sessionsDir, config.defaultCwd).then((sessionPath) => {
         if (sessionPath) void replies.enqueue({ channel: i.channel, messageId: i.messageId, sessionPath });
       });

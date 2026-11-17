@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { toInbound, formatInbound } from "../src/messenger/discord-inbound.ts";
+import { formatInbound, toInbound } from "../src/messenger/discord-message.ts";
 import { answerText, lastAnswer, MAX_DISCORD_CHARS, splitForDiscord } from "../src/messenger/discord-reply.ts";
 
 const message = (extra: Record<string, unknown>) => ({

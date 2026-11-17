@@ -29,6 +29,8 @@ export type DoriConfig = {
   readonly workspaces: readonly string[];
   readonly ignorePanes: readonly string[];
   readonly leadPane: string;
+  /** Dori's own Discord user id, so a bot's reply to Dori's post is told apart from a reply to another bot. */
+  readonly discordSelfId?: string;
   readonly defaultCwd: string;
   readonly agentCommand: ArgvTemplate;
   readonly defaultModel: string;
@@ -215,6 +217,7 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     defaultCwd: expandHome(merged.defaultCwd, home),
     sessionsDir: expandHome(merged.sessionsDir, home),
     leadPane: process.env["DORI_LEAD_PANE"] ?? merged.leadPane,
+    ...(merged.discordSelfId ? { discordSelfId: merged.discordSelfId } : {}),
   };
 };
 

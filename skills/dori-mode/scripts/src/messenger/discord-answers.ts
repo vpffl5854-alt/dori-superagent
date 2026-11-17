@@ -5,6 +5,9 @@
  * The pane is told where to read the message (its session log, from the offset the message is logged at) so the
  * answer can be found without guessing which assistant text belongs to which message. The answer is read from that
  * log, not the screen, so a long answer arrives whole.
+ *
+ * The human's messages are answered by the lead pane. A bot post that called Dori is answered in the room by
+ * `discord-bot-replies.ts`, with the lead's answer when it has one; other bot chatter is logged and left alone.
  */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,8 +16,11 @@ import type { SessionRef } from "../../../../../src/runtime/types.ts";
 import type { DoriConfig } from "../config.ts";
 import { run, runtimesOf } from "../run.ts";
 import { agentStatus, readScreen, sendVerified } from "../sessions.ts";
+import { botAnswerer } from "./discord-bot-replies.ts";
 import type { Discord } from "./discord.ts";
+import type { Inbound } from "./discord-gateway.ts";
 import { lastAnswer, postAnswer, sessionSize } from "./discord-reply.ts";
+import { newestSessionLog } from "./session-log.ts";
 
 const POLL_MS = 1_500;
 const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -68,16 +74,8 @@ const leadRef = (config: Pick<DoriConfig, "leadPane">): SessionRef | undefined =
 };
 
 /** The session log the pane's agent writes: the newest file for the pane's working directory. */
-export const sessionPathFor = async (sessionsDir: string, cwd: string): Promise<string | undefined> => {
-  const dir = join(sessionsDir, `--${cwd.replace(/^\//, "").replace(/\//g, "-")}--`);
-  const list = await run(["ls", "-t", dir]);
-  if (list.code !== 0) return undefined;
-  const newest = list.out
-    .split("\n")
-    .map((name) => name.trim())
-    .find((name) => /^\d{4}-\d\d-\d\dT[\d-]+Z_[0-9a-f-]{36}\.jsonl$/.test(name));
-  return newest ? join(dir, newest) : undefined;
-};
+export const sessionPathFor = (sessionsDir: string, cwd: string): Promise<string | undefined> =>
+  newestSessionLog(run, sessionsDir, cwd);
 
 /** True when the pane's input box already holds unsent text: typing then would append to it, not send. */
 const draftPresent = async (rts: ReturnType<typeof runtimesOf>, ref: SessionRef): Promise<boolean> => {
@@ -115,8 +113,10 @@ export const startDiscordReplies = (
   discord: Discord,
   stateDir: string,
   config: DoriConfig,
+  sessionPath: () => Promise<string | undefined> = () => sessionPathFor(config.sessionsDir, config.defaultCwd),
 ): ReplyLoop & {
   readonly enqueue: (item: Omit<Pending, "offset">) => Promise<boolean>;
+  readonly enqueueBot: (inbound: Inbound) => Promise<boolean>;
 } => {
   const path = pendingPath(stateDir);
   const rts = runtimesOf({ run, clock, config });
@@ -131,6 +131,35 @@ export const startDiscordReplies = (
     writePending(path, [...pending.filter((p) => p.messageId !== item.messageId), { ...item, offset: size }]);
     return true;
   };
+
+  /** The lead's answer to a bot that called Dori: handed over like a human's message, then read from its log. */
+  const askLead = async (inbound: Inbound): Promise<string | undefined> => {
+    if (!ref) return undefined;
+    const sessionLog = await sessionPath();
+    if (!sessionLog) return undefined;
+    const size = sessionSize(sessionLog);
+    if (!(await handOff(rts, ref, sessionLog, inbound.channel, inbound.messageId))) return undefined;
+    const started = Date.now();
+    while (!stopped && Date.now() - started < MAX_WAIT_MS) {
+      await sleep(POLL_MS);
+      const text = lastAnswer(sessionLog, size);
+      if (text) return text;
+    }
+    return undefined;
+  };
+
+  const enqueueBot = botAnswerer({
+    discord,
+    stateDir,
+    selfId: config.discordSelfId ?? "",
+    note: (line) => note(stateDir, line),
+    answer: async (inbound) => {
+      const answered = await askLead(inbound);
+      if (answered) return answered;
+      const sessionLog = await sessionPath();
+      return sessionLog ? lastAnswer(sessionLog, 0) : undefined;
+    },
+  });
 
   const answer = async (item: Pending): Promise<boolean> => {
     const started = Date.now();
@@ -168,5 +197,6 @@ export const startDiscordReplies = (
       stopped = true;
     },
     enqueue,
+    enqueueBot,
   };
 };

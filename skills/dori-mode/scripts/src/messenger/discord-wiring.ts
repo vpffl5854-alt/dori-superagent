@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 
 import { die } from "../cli-context.ts";
 import { fetchHttp, withBackoff } from "./http.ts";
-import type { ChannelGuild, ChannelHistory, CursorStore, GatewaySocket, MediaStore } from "./discord-inbound.ts";
+import type { ChannelGuild, ChannelHistory, CursorStore, GatewaySocket, MediaStore } from "./discord-gateway.ts";
 import { realClock, run } from "../run.ts";
 
 export const discordToken = (home: string = homedir()): string => {
