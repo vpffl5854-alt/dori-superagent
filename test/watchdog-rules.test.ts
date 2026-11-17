@@ -148,6 +148,13 @@ describe("watchdog repeat rule", () => {
     expect(repeatedScratch(screen(...line))).toBeUndefined();
   });
 
+  test("output that repeats is not a command; a command that repeats still is", () => {
+    const prose = Array.from({ length: 6 }, () => "브리프 확인 완료. 대기 중.");
+    expect(repeatedScratch(screen(...prose))).toBeUndefined();
+    const loop = Array.from({ length: SAME_COMMAND_THRESHOLD }, () => "bun test ./test/x.test.ts");
+    expect(repeatedScratch(screen(...loop))?.rule).toBe("repeat");
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");
