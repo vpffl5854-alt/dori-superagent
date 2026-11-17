@@ -19,6 +19,10 @@ const WRITE_VERB =
   /(?:^|[|;&(]\s*)(?:rm\s|cp\s|mv\s|sed\s|tee\s|touch\s|cat\s*>|echo\s*>|\S+\.(?:m?[jt]s|cjs|sh)(?:\s|$))/;
 // A command line that is only a command name and a few arguments, so a long script never counts as "the same command".
 const SHORT_COMMAND = 80;
+// A tool's own result line (`✓ <1s`, `✗ exit 1`, `done · 1 call`): every run of any tool prints one, so counting them
+// makes a lane that worked a lot look like a lane that ran one command over and over.
+const TOOL_RESULT_LINE = /^[✓✗✕·•]\s/;
+const TOOL_RESULT_TAIL = /\s(?:done|failed)\s·\s/;
 
 export type WatchdogFinding =
   | { readonly rule: "budget"; readonly key: string; readonly budgetMin: number; readonly elapsedMin: number }
@@ -65,7 +69,13 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
       const seen = paths.get(family) ?? { path, count: 0 };
       paths.set(family, { path: seen.path, count: seen.count + 1 });
     }
-    if (line.length <= SHORT_COMMAND && !line.includes("[REPORT]") && !line.includes("[LEAD]"))
+    if (
+      line.length <= SHORT_COMMAND &&
+      !TOOL_RESULT_LINE.test(line) &&
+      !TOOL_RESULT_TAIL.test(line) &&
+      !line.includes("[REPORT]") &&
+      !line.includes("[LEAD]")
+    )
       commands.set(line, (commands.get(line) ?? 0) + 1);
   }
   const loop = [...paths.values()].find((p) => p.count >= REPEAT_THRESHOLD);

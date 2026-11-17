@@ -108,6 +108,15 @@ describe("watchdog repeat rule", () => {
     expect(found.path).toContain("same command");
   });
 
+  test("a tool's own result lines are not a command the lane ran", () => {
+    const results = Array.from({ length: 20 }, () => "✓ <1s");
+    expect(repeatedScratch(screen(...results))).toBeUndefined();
+    expect(
+      repeatedScratch(screen(...results, "✓ eval js (bun 1.4.4) done · 1 call · 18.52 calls/s · <1s")),
+    ).toBeUndefined();
+    expect(repeatedScratch(screen(...results, "✗ exit 1"))).toBeUndefined();
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");
