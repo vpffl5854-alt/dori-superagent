@@ -30,6 +30,8 @@ type Pending = {
   messageId: string;
   sessionPath: string;
   offset: number;
+  /** The message body, carried so the lane answers from it instead of opening the session log first. */
+  text?: string;
   /** Who wrote the message, shown to the pane so it knows whose words it is answering. */
   author?: string;
   /** Where this message's own turn started, when the pane was idle at the hand-off: an answer before it is not this one's. */
@@ -88,13 +90,15 @@ const handOff = async (
   channel: string,
   messageId: string,
   author?: string,
+  text?: string,
 ): Promise<boolean> => {
   const status = await agentStatus(rts, ref);
   if (status === undefined || status === "shell" || status === "gone") return false;
   if (await draftPresent(rts, ref)) return false;
+  const body = text?.trim() ? `\n본문: ${text.trim()}` : `\n원문은 위 세션기록에서 읽으세요: ${sessionPath}`;
   const prompt =
-    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${author}]`} · 세션기록=${sessionPath}\n` +
-    "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰고, 원문은 위 세션기록에서 읽으세요.";
+    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${author}]`}${body}\n` +
+    "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰세요.";
   return (await sendVerified(rts, clock, ref, prompt)) !== "failed";
 };
 
@@ -125,7 +129,8 @@ export const startDiscordReplies = (
     // The status is read through the hand-off's own lookup, so the test double and a real pane agree on where it comes
     // from: a working pane answers inside the turn it is already running, an idle one starts a turn for this message.
     const before = (await statusLookup(rts, ref)).status;
-    if (!(await handOff(rts, ref, item.sessionPath, item.channel, item.messageId, item.author))) return false;
+    if (!(await handOff(rts, ref, item.sessionPath, item.channel, item.messageId, item.author, item.text)))
+      return false;
     const pending = readPending(path);
     // An idle pane starts a turn for this message, so its first answer is this message's. A working pane answers inside
     // the turn it is already running, and the text it writes there may be for an earlier message: only an answer that
@@ -145,7 +150,8 @@ export const startDiscordReplies = (
     const sessionLog = await sessionPath();
     if (!sessionLog) return undefined;
     const size = sessionSize(sessionLog);
-    if (!(await handOff(rts, ref, sessionLog, inbound.channel, inbound.messageId, inbound.author))) return undefined;
+    if (!(await handOff(rts, ref, sessionLog, inbound.channel, inbound.messageId, inbound.author, inbound.text)))
+      return undefined;
     const started = Date.now();
     while (!stopped && Date.now() - started < MAX_WAIT_MS) {
       await sleep(POLL_MS);

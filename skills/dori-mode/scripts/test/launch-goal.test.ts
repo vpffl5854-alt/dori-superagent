@@ -26,7 +26,7 @@ test("a narrow pane that cuts the goal footer short reads STARTUP_OK when the la
     const prompt = `ulw set goal and work. Read and execute the lane brief at ${brief} in full. You are the ${lane} lane; report as the brief's footer says.`;
     writeFileSync(
       join(store, `${at.replace(/:/g, "-").replace(".", "-")}_${id}.jsonl`),
-      [
+      `${[
         { type: "session", version: 3, id, timestamp: at, cwd: "/repo" },
         {
           type: "message",
@@ -37,7 +37,7 @@ test("a narrow pane that cuts the goal footer short reads STARTUP_OK when the la
         },
       ]
         .map((line) => JSON.stringify(line))
-        .join("\n") + "\n",
+        .join("\n")}\n`,
     );
     if (status)
       writeFileSync(
