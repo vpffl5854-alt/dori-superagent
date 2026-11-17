@@ -3,7 +3,14 @@ import { basename, join } from "node:path";
 import type { Deps } from "./harness.ts";
 import { tellLead } from "./inbox.ts";
 import type { Lane } from "./store-types.ts";
-import { budgetOverrun, findingText, repeatedScratch, type WatchdogFinding } from "./watchdog-rules.ts";
+import {
+  budgetOverrun,
+  findingText,
+  readBlockedLog,
+  repeatedBlocks,
+  repeatedScratch,
+  type WatchdogFinding,
+} from "./watchdog-rules.ts";
 
 const BACKUP_FILE_LIMIT = 200;
 const BACKUP_BYTES_LIMIT = 20 * 1024 * 1024;
@@ -72,7 +79,9 @@ export async function watchdogFinding(d: Deps, lane: Lane): Promise<WatchdogFind
     .read(lane.sessionRef, 200)
     .catch(() => "");
   const repeat = repeatedScratch(screen);
-  return repeat ? { ...repeat, key: lane.key } : undefined;
+  if (repeat) return { ...repeat, key: lane.key };
+  // The omo repeat-guard extension's log, read only: a lane it keeps blocking is stuck even when its screen looks calm.
+  return repeatedBlocks(lane, readBlockedLog(join(d.store.root, "logs", "repeat-guard.log")), d.now());
 }
 
 // Closes the lane's session (hc: kill then rm; herdr: pane close), backs it up, and tells the lead once.

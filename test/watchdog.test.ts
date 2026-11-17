@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
@@ -76,6 +76,47 @@ describe("duty watchdog", () => {
     expect(await Bun.file(join(backup, "loop-lane.md")).exists()).toBe(true);
     expect(await Bun.file(join(backup, "lane.json")).exists()).toBe(true);
     expect(d.store.lane("loop-lane")?.watchdog?.rule).toBe("repeat");
+  });
+
+  test("closes a lane the repeat-guard keeps blocking, and leaves a lane with no blocks alone", async () => {
+    const { w, d, lead, brief } = setup();
+    const stuckCwd = mkdtempSync(join(tmpdir(), "dori-stuck-lane-"));
+    const calmCwd = mkdtempSync(join(tmpdir(), "dori-calm-lane-"));
+    const stuck = await startLane(d, "stuck-lane", brief, { group: "w1", cwd: stuckCwd });
+    const calm = await startLane(d, "calm-lane", brief, { group: "w1", cwd: calmCwd });
+    w.panes.get(stuck.paneId)!.status = "working";
+    w.panes.get(calm.paneId)!.status = "working";
+    mkdirSync(join(d.store.root, "logs"), { recursive: true });
+    const line = (minAgo: number, target: string) =>
+      JSON.stringify({ ts: new Date(w.clock - minAgo * MIN).toISOString(), verdict: "blocked", tool: "bash", target });
+    const lines = [
+      "{broken",
+      line(1, `${stuckCwd}/mkdbg10.ts`),
+      line(2, `${stuckCwd}/mkdbg11.ts`),
+      line(3, `${calmCwd}/mkdbg12.ts`),
+      line(4, "grep /tmp/x.log foo"),
+      line(5, `${stuckCwd}/mkdbg13.ts`),
+      line(6, `${stuckCwd}/mkdbg14.ts`),
+    ];
+    const log = join(d.store.root, "logs", "repeat-guard.log");
+    writeFileSync(log, `${lines.join("\n")}\n`);
+    expect((await dutyTick(d)).filter((e) => e.lane === "stuck-lane")).toEqual([]);
+    writeFileSync(log, `${[...lines, line(7, `${stuckCwd}/mkdbg15.ts`)].join("\n")}\n`);
+    const events = await dutyTick(d);
+    expect(events).toContainEqual({
+      lane: "stuck-lane",
+      action: "watchdog-blocked",
+      detail: expect.stringContaining("[WATCHDOG] stuck-lane repeat-guard 차단 반복으로 자동 종료(15분 안에 5건)"),
+    });
+    expect(events.filter((e) => e.lane === "calm-lane")).toEqual([]);
+    expect(w.panes.has(stuck.paneId)).toBe(false);
+    expect(w.panes.has(calm.paneId)).toBe(true);
+    expect(lead.received.at(-1)).toContain("[WATCHDOG] stuck-lane");
+    const closed = d.store.lane("stuck-lane");
+    expect(closed?.status).toBe("lost");
+    expect(closed?.watchdog?.rule).toBe("blocked");
+    const backup = lead.received.at(-1)?.match(/백업 (\S+)/)?.[1] ?? "";
+    expect(await Bun.file(join(backup, "stuck-lane.md")).exists()).toBe(true);
   });
 
   test("start refuses a budget that is not a positive number of minutes", async () => {

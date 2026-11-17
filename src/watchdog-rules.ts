@@ -1,11 +1,16 @@
-// The two rules the duty loop applies to a running lane. Both are pure: the caller reads the lane, the clock and the
-// screen, and this file decides. Thresholds are deliberately conservative, so a normal retry is never a finding.
+// The rules the duty loop applies to a running lane. All are pure: the caller reads the lane, the clock, the screen
+// and the repeat-guard log, and this file decides. Thresholds are deliberately conservative, so a normal retry is
+// never a finding.
+import { readFileSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import type { Lane } from "./store-types.ts";
 
 export const DEFAULT_BUDGET_MIN = 40;
 export const BUDGET_FACTOR = 1.5;
 export const REPEAT_THRESHOLD = 3;
 export const SAME_COMMAND_THRESHOLD = 4;
+export const BLOCKED_WINDOW_MIN = 15;
+export const BLOCKED_THRESHOLD = 5;
 // Only scratch-looking paths count: /tmp files, debug scripts, stray logs. A repo source file does not.
 const SCRATCH_PATH =
   /(?:^|[\s'"=])((?:\/tmp|\/private\/tmp|\/var\/folders)\/\S+|\S*(?:dbg|debug|tmp|scratch)\S*\.(?:m?[jt]s|cjs|sh|log|json|txt)|[^\s/]+\.log)\b/g;
@@ -17,7 +22,8 @@ const SHORT_COMMAND = 80;
 
 export type WatchdogFinding =
   | { readonly rule: "budget"; readonly key: string; readonly budgetMin: number; readonly elapsedMin: number }
-  | { readonly rule: "repeat"; readonly key: string; readonly path: string; readonly count: number };
+  | { readonly rule: "repeat"; readonly key: string; readonly path: string; readonly count: number }
+  | { readonly rule: "blocked"; readonly key: string; readonly count: number; readonly windowMin: number };
 
 export const budgetMin = (lane: Lane): number => lane.budgetMin ?? DEFAULT_BUDGET_MIN;
 
@@ -69,10 +75,65 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
   return undefined;
 }
 
+// Rule 3 input: one line of ~/.dori/logs/repeat-guard.log, the JSONL the omo repeat-guard extension appends. Only a
+// blocked record with a target is kept; anything else (a broken line, another verdict, a record without a target) is
+// dropped silently, because a log is not a contract.
+type BlockedRecord = { readonly at: number; readonly target: string };
+
+export const parseBlocked = (line: string): BlockedRecord | undefined => {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { ts, verdict, target } = raw as Record<string, unknown>;
+  if (verdict !== "blocked" || typeof ts !== "string" || typeof target !== "string") return undefined;
+  const at = Date.parse(ts);
+  return Number.isFinite(at) ? { at, target } : undefined;
+};
+
+// A lane is named only by a target that carries its cwd as a whole path: /worktrees/a must not claim
+// /worktrees/a2/..., and the cwd alone (a command run at the lane root) names it too. A record that names no lane
+// counts for none.
+const namesLane = (target: string, cwd: string): boolean => {
+  const dir = resolve(cwd);
+  return [`${dir}${sep}`, `${dir}/`].some((p) => target.includes(p)) || target.trim() === dir;
+};
+
+// Rule 3: BLOCKED_THRESHOLD calls of the lane blocked by the repeat-guard within BLOCKED_WINDOW_MIN. The guard stops
+// one call; a lane that keeps earning blocks is stuck, and the log is the record of it.
+export function repeatedBlocks(
+  lane: Lane,
+  lines: readonly string[],
+  now: number,
+  windowMin = BLOCKED_WINDOW_MIN,
+): WatchdogFinding | undefined {
+  const since = now - windowMin * 60_000;
+  let count = 0;
+  for (const line of lines) {
+    const record = parseBlocked(line);
+    if (record && record.at >= since && record.at <= now && namesLane(record.target, lane.cwd)) count++;
+  }
+  return count >= BLOCKED_THRESHOLD ? { rule: "blocked", key: lane.key, count, windowMin } : undefined;
+}
+
+// The log's lines, or none when the file is missing or unreadable: no log is no evidence of a loop.
+export function readBlockedLog(path: string): string[] {
+  try {
+    return readFileSync(path, "utf8").split("\n");
+  } catch {
+    return [];
+  }
+}
+
 export function findingText(f: WatchdogFinding, note?: string): string {
   const why =
     f.rule === "budget"
       ? `시간 초과로 자동 종료(예산 ${f.budgetMin}분 x${BUDGET_FACTOR}, 경과 ${f.elapsedMin}분)`
-      : `반복 작업 감지로 자동 종료(같은 경로 ${f.count}회: ${f.path})`;
+      : f.rule === "repeat"
+        ? `반복 작업 감지로 자동 종료(같은 경로 ${f.count}회: ${f.path})`
+        : `repeat-guard 차단 반복으로 자동 종료(${f.windowMin}분 안에 ${f.count}건)`;
   return `[WATCHDOG] ${f.key} ${why}${note ? `; ${note}` : ""}`;
 }
