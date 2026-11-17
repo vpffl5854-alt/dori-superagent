@@ -113,7 +113,7 @@ export const toInbound = (data: unknown, selfId: string, guildHint?: string | nu
 };
 
 export const formatInbound = (i: Inbound): string =>
-  `INBOUND discord ${i.source} ${i.channel} ${i.guild} ${i.messageId} ${i.author} ${JSON.stringify(i.text.slice(0, MAX_INBOUND_TEXT))}` +
+  `INBOUND discord ${i.source} ${i.channel} ${i.guild} ${i.messageId} [수신 | ${i.author}] ${JSON.stringify(i.text.slice(0, MAX_INBOUND_TEXT))}` +
   (i.mentions && i.mentions.length > 0 ? ` mentions=${i.mentions.join(",")}` : "") +
   (i.media && i.media.length > 0 ? ` media=${i.media.join(",")}` : "") +
   (i.replyToId

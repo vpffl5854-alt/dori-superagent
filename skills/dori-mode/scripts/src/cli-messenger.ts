@@ -174,7 +174,8 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
         return;
       }
       void sessionPathForPane(config).then((sessionPath) => {
-        if (sessionPath) void replies.enqueue({ channel: i.channel, messageId: i.messageId, sessionPath });
+        if (sessionPath)
+          void replies.enqueue({ channel: i.channel, messageId: i.messageId, sessionPath, author: i.author });
       });
     },
     (line) => console.error(`[${new Date().toISOString().replace(/\.\d+Z$/, "Z")}] discord gateway: ${line}`),

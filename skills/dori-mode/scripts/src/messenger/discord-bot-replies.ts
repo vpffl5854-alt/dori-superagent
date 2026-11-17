@@ -40,7 +40,9 @@ export const botCall = (
     selfId !== "" && (inbound.replyToAuthor === selfId || inbound.replyToAuthor?.toLowerCase() === DORI_NAME);
   if (replied) return `replied to ${DORI_NAME}`;
   if (called) return `called ${DORI_NAME}`;
-  return null;
+  // Any other bot post is still offered to the answerer: a person reads the room and speaks when there is something to
+  // add or push back on, and says nothing when there is not. `hasContent` below drops an empty answer.
+  return "room talk";
 };
 
 /** Per channel and per bot, so a restart does not reset the count and two bots cannot spend each other's. */

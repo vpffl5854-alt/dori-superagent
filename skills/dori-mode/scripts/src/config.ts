@@ -11,6 +11,8 @@ export type Hooks = {
   readonly threadReply?: ArgvTemplate;
   readonly threadDone?: ArgvTemplate;
   readonly transcribe?: ArgvTemplate;
+  /** How the Discord room's lane posts its answer: `{channel}`, `{message}` and `{text}`. */
+  readonly discordReply?: ArgvTemplate;
 };
 
 export type GuardThresholds = {

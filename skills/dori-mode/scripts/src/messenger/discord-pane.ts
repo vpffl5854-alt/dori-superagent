@@ -3,19 +3,19 @@ import type { DoriConfig } from "../config.ts";
 import { type ChosenRuntimes, run, runtimesOf } from "../run.ts";
 import { newestSessionLog } from "./session-log.ts";
 
-const leadRef = (config: Pick<DoriConfig, "leadPane">): SessionRef | undefined => {
+const leadRef = (config: Pick<DoriConfig, "leadPane" | "runtime">): SessionRef | undefined => {
   const raw = config.leadPane.trim();
   if (!raw) return undefined;
   const [kind, ...rest] = raw.split(":");
   const id = rest.join(":");
-  if (!id) return undefined;
-  if (kind === "hc") return { runtime: "hc", id };
-  if (kind === "herdr") return { runtime: "herdr", id };
-  return undefined;
+  if (kind === "hc" && id) return { runtime: "hc", id };
+  if (kind === "herdr" && id) return { runtime: "herdr", id };
+  // A bare name (`discord-chat`) is a lane found by name, in the configured runtime.
+  return { runtime: config.runtime ?? "hc", id: raw };
 };
 
 export const resolveLeadRef = async (
-  config: Pick<DoriConfig, "leadPane">,
+  config: Pick<DoriConfig, "leadPane" | "runtime">,
   rts: ChosenRuntimes,
 ): Promise<SessionRef | undefined> => {
   const ref = leadRef(config);
