@@ -11,6 +11,9 @@ import { openSession } from "./runtime/types.ts";
 import { KEY_RE, reservedKey, type Lane } from "./store-types.ts";
 import { DEFAULT_BUDGET_MIN } from "./watchdog-rules.ts";
 
+/** The lane rules footer, cut off before a new one is written so a re-opened lane keeps exactly one copy. */
+const FOOTER_MARK = "## Lane rules (added by dori";
+
 export async function startLane(
   d: Deps,
   key: string,
@@ -29,7 +32,12 @@ export async function startLane(
   const cwd = resolve(opts.cwd ?? process.cwd());
   const briefPath = d.store.briefPath(key);
   const footer = prompt("lane-footer.md", { key, dori: d.doriCmd });
-  await Bun.write(briefPath, `${readFileSync(briefFile, "utf8").trimEnd()}\n\n${footer}`);
+  // Re-opening a lane reuses its brief file: the old footer is cut off first, so the rules land in it once instead of
+  // again on every open (14 copies of them, 2026-11-18).
+  const body = readFileSync(briefFile, "utf8");
+  const cut = body.indexOf(FOOTER_MARK);
+  const original = (cut < 0 ? body : body.slice(0, cut)).trimEnd();
+  await Bun.write(briefPath, `${original}\n\n${footer}`);
 
   // The group is the caller's own when it runs in a session of the selected runtime (a lane opened from the lead's
   // workspace stays there); otherwise herdr gets a new "dori" workspace and hc this home's group label.
