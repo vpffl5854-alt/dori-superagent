@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { type DoriConfig, defaultConfig } from "../src/config.ts";
 import { startDiscordReplies } from "../src/messenger/discord-answers.ts";
+import { sessionPathForPane } from "../src/messenger/discord-pane.ts";
 import type { ChosenRuntimes } from "../src/run.ts";
 import { BOT_REPLY_BUDGET, botAnswerer, botCall, DORI_NAME, hasContent } from "../src/messenger/discord-bot-replies.ts";
 import type { Inbound } from "../src/messenger/discord-gateway.ts";
@@ -211,4 +212,36 @@ test("a message enqueued while the lead is working still posts that message's ow
     }
     expect(posts(seen)).toHaveLength(1);
     expect(sent(posts(seen)[0])["content"]).toBe("다음 메시지의 답");
+  }));
+
+test("the room's pane is found by its name when a restart gave it a new address", () =>
+  withState(async (stateDir) => {
+    const sessionsDir = join(stateDir, "sessions");
+    const dir = join(sessionsDir, "--Users-jib-.dori-superagent-workspace--");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2026-11-17T10-00-00-000Z_01234567-89ab-cdef-0123-456789abcdef.jsonl"), "");
+    const rts = {
+      for: () => ({
+        list: async () => [
+          { ref: { runtime: "hc", id: "t1t" }, name: "lead", cwd: "/tmp/lead" },
+          { ref: { runtime: "hc", id: "t99" }, name: "discord-chat", cwd: "/Users/jib/.dori-superagent/workspace" },
+        ],
+      }),
+    } as unknown as ChosenRuntimes;
+    const config: DoriConfig = {
+      ...defaultConfig(stateDir),
+      runtime: "hc",
+      leadPane: "discord-chat",
+      sessionsDir,
+      defaultCwd: "/Users/jib/.dori-superagent/workspace",
+    };
+    expect(await sessionPathForPane(config, rts)).toBe(
+      join(dir, "2026-11-17T10-00-00-000Z_01234567-89ab-cdef-0123-456789abcdef.jsonl"),
+    );
+    // An address still wins when it is live; a name nothing carries falls back to the default directory, which has no
+    // session log here.
+    expect(await sessionPathForPane({ ...config, leadPane: "hc:t1t", defaultCwd: "/tmp/lead" }, rts)).toBeUndefined();
+    expect(await sessionPathForPane({ ...config, leadPane: "nobody" }, rts)).toBe(
+      join(dir, "2026-11-17T10-00-00-000Z_01234567-89ab-cdef-0123-456789abcdef.jsonl"),
+    );
   }));

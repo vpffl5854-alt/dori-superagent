@@ -20,7 +20,7 @@ import { botAnswerer } from "./discord-bot-replies.ts";
 import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
 import { lastAnswer, postAnswer, sessionSize } from "./discord-reply.ts";
-import { newestSessionLog } from "./session-log.ts";
+import { resolveLeadRef, sessionPathFor } from "./discord-pane.ts";
 
 const POLL_MS = 1_500;
 const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -62,22 +62,6 @@ const note = (stateDir: string, line: string): void => {
     appendFileSync(logPath(stateDir), `[${new Date().toISOString()}] ${line}\n`);
   } catch {}
 };
-
-/** The lead pane the config names (`hc:t1t`, `herdr:w1:p3`), or undefined when it names none. */
-const leadRef = (config: Pick<DoriConfig, "leadPane">): SessionRef | undefined => {
-  const raw = config.leadPane.trim();
-  if (!raw) return undefined;
-  const [kind, ...rest] = raw.split(":");
-  const id = rest.join(":");
-  if (!id) return undefined;
-  if (kind === "hc") return { runtime: "hc", id };
-  if (kind === "herdr") return { runtime: "herdr", id };
-  return undefined;
-};
-
-/** The session log the pane's agent writes: the newest file for the pane's working directory. */
-export const sessionPathFor = (sessionsDir: string, cwd: string): Promise<string | undefined> =>
-  newestSessionLog(run, sessionsDir, cwd);
 
 /** True when the pane's input box already holds unsent text: typing then would append to it, not send. */
 const draftPresent = async (rts: ReturnType<typeof runtimesOf>, ref: SessionRef): Promise<boolean> => {
@@ -122,11 +106,14 @@ export const startDiscordReplies = (
   readonly enqueueBot: (inbound: Inbound) => Promise<boolean>;
 } => {
   const path = pendingPath(stateDir);
-  const ref = leadRef(config);
+  // The named pane is looked up again whenever the reply loop needs it: a lane renamed or reopened gets a new address,
+  // and the name is what stays the same.
+  const target = async (): Promise<SessionRef | undefined> => await resolveLeadRef(config, rts).catch(() => undefined);
   let stopped = false;
   const posted = new Set<string>();
 
   const enqueue = async (item: Omit<Pending, "offset">): Promise<boolean> => {
+    const ref = await target();
     if (!ref) return false;
     // Read before the hand-off: a working pane answers the next prompt in the turn it is already running, so the
     // answer can land before the hand-off returns. A size read after it would start past that answer, and the next
@@ -150,6 +137,7 @@ export const startDiscordReplies = (
 
   /** The lead's answer to a bot that called Dori: handed over like a human's message, then read from its log. */
   const askLead = async (inbound: Inbound): Promise<string | undefined> => {
+    const ref = await target();
     if (!ref) return undefined;
     const sessionLog = await sessionPath();
     if (!sessionLog) return undefined;
@@ -180,6 +168,7 @@ export const startDiscordReplies = (
   const answer = async (item: Pending): Promise<boolean> => {
     const started = Date.now();
     let working = false;
+    const ref = await target();
     while (!stopped && Date.now() - started < MAX_WAIT_MS) {
       await sleep(POLL_MS);
       // A pane that is still working is writing this message's answer; one that has gone idle has finished the turn, and

@@ -3,7 +3,8 @@ import { type Command, die, envSlackToken, every, slackAuth } from "./cli-contex
 import type { DoriConfig } from "./config.ts";
 import { formatInbound } from "./messenger/discord-message.ts";
 import { DiscordInbound } from "./messenger/discord-inbound.ts";
-import { startDiscordReplies, sessionPathFor } from "./messenger/discord-answers.ts";
+import { startDiscordReplies } from "./messenger/discord-answers.ts";
+import { sessionPathForPane } from "./messenger/discord-pane.ts";
 import {
   channelGuild,
   channelHistory,
@@ -156,6 +157,9 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
     new Discord(fetchHttp, realClock, dcToken),
     stateDir,
     config.discordSelfId ? config : { ...config, discordSelfId: me },
+    // The room is answered in the pane the config names (`leadPane`), and its answer is read from that pane's own
+    // session log: the pane's working directory is what the log is filed under.
+    () => sessionPathForPane(config),
   );
   const inbound = new DiscordInbound(
     () => openGatewaySocket(),
@@ -169,7 +173,7 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
         void replies.enqueueBot(i);
         return;
       }
-      void sessionPathFor(config.sessionsDir, config.defaultCwd).then((sessionPath) => {
+      void sessionPathForPane(config).then((sessionPath) => {
         if (sessionPath) void replies.enqueue({ channel: i.channel, messageId: i.messageId, sessionPath });
       });
     },
