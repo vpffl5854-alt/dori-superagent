@@ -31,13 +31,17 @@ export const splitForDiscord = (text: string): string[] => {
   return out;
 };
 
-/** The routing line the lead opens every turn with is for its own pane, not for the person in Discord. */
-const ROUTING_LINE = /^\s*I read this as\b/im;
+/**
+ * Lines the pane writes for itself, never for the person in Discord: its routing line and its hand-off block. A slot
+ * label only counts with the colon that makes it a label, so a real Korean answer that happens to start with `Now` is
+ * left alone.
+ */
+const META_LINE = /^\s*(I read this as\b|Ask:|wanted:|For you:|Now:|Next:|HANDOFF\b)/i;
 
 /**
  * The answer text of one assistant message, or undefined for a message that carries none (a tool call only).
- * The routing line is dropped only when more text follows it: an answer that is nothing but that line is still an
- * answer, and dropping it would leave the person with silence.
+ * Leading lines the pane writes for itself are dropped; a message that is nothing but those lines is no answer, and
+ * posting it would put an English sentence in a Korean room.
  */
 export const answerText = (message: unknown): string | undefined => {
   const parts = (message as { content?: unknown } | null)?.content;
@@ -51,10 +55,10 @@ export const answerText = (message: unknown): string | undefined => {
     .join("\n")
     .trim();
   if (!text) return undefined;
-  // The routing line is the pane's own note, never the room's answer: an answer that is nothing but that line is no
-  // answer, and posting it puts an English sentence in a Korean room.
-  if (!ROUTING_LINE.test(text.split("\n")[0] ?? "")) return text;
-  return text.split("\n").slice(1).join("\n").trim() || undefined;
+  const lines = text.split("\n");
+  let first = 0;
+  while (first < lines.length && META_LINE.test(lines[first] ?? "")) first += 1;
+  return lines.slice(first).join("\n").trim() || undefined;
 };
 
 /** The last assistant answer in a session log written after `fromOffset`, or undefined when there is none yet. */
