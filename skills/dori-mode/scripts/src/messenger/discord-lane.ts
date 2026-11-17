@@ -6,6 +6,10 @@
  * The lane is told where to read the message (its session log, from the offset the message is logged at) so the answer
  * can be found without guessing which assistant text belongs to which message. The answer is read from that log, not
  * the screen, so a long answer arrives whole.
+ *
+ * The prompt is typed into a pane that is watching a room, so it is the room's own name for the message and nothing
+ * more: a line that reads like a standing order ("답은 …만 쓰고") is taken as a command and repeated by a lane that
+ * answers in prose, and the watchdog then sees one command run over and over.
  */
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,9 +61,7 @@ const askLane = async (
   if (status.status === undefined || status.status === "shell" || status.status === "gone") return undefined;
   if (await draftPresent(rts, ref)) return undefined;
   const size = sessionSize(sessionLog);
-  const prompt =
-    `디코 수신 · 채널=${inbound.channel} msg=${inbound.messageId} · 세션기록=${sessionLog}\n` +
-    "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰고, 원문은 위 세션기록에서 읽으세요.";
+  const prompt = `디코 수신 · 채널=${inbound.channel} msg=${inbound.messageId} · 세션기록=${sessionLog}`;
   if ((await sendVerified(rts, clock, ref, prompt)) === "failed") return undefined;
   const started = Date.now();
   // The lane starts a turn for this message; the answer is read once that turn has ended, because a working lane may

@@ -146,6 +146,9 @@ test(
         replies.stop();
       }
       expect(delivered[0]).toContain("msg=10");
+      // The prompt is the message's name and nothing else: a line that reads like a standing order is repeated by a
+      // lane that answers in prose, and the watchdog then sees one command run over and over.
+      expect(delivered[0]).toBe(`디코 수신 · 채널=${CHANNEL} msg=10 · 세션기록=${log}`);
       expect(calls).toEqual([["dori", "send", "discord", "--to", CHANNEL, "--text", ANSWER]]);
       expect(posts(seen)).toHaveLength(0);
     }),
