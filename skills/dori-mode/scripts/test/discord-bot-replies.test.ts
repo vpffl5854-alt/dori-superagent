@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { type DoriConfig, defaultConfig } from "../src/config.ts";
 import { startDiscordReplies } from "../src/messenger/discord-answers.ts";
+import type { ChosenRuntimes } from "../src/run.ts";
 import { BOT_REPLY_BUDGET, botAnswerer, botCall, DORI_NAME, hasContent } from "../src/messenger/discord-bot-replies.ts";
 import type { Inbound } from "../src/messenger/discord-gateway.ts";
 import { toInbound } from "../src/messenger/discord-message.ts";
@@ -93,7 +94,7 @@ test("a bot post that does not call Dori is logged and nothing is posted", () =>
       replies.stop();
     }
     expect(posts(seen)).toHaveLength(0);
-    expect(log(stateDir)).toContain("bot 상디 in c1 left alone");
+    expect(log(stateDir)).toContain("bot 상디 in c1 room talk, but there was no answer with content");
   }));
 
 test("a bot that calls Dori is answered in the room with real content, as a reply to its post", () =>
@@ -158,11 +159,12 @@ test("a failed post spends nothing, so a Discord outage does not use up the room
     expect(notes.at(-1)).toContain("bot answer failed for 10");
   }));
 
-test("a bot that replies to Dori's own post is answered; a reply to another bot is not", () => {
+test("a bot that replies to Dori's own post is answered; another bot's post is still offered to the answerer", () => {
   const toDori = botPost({ replyTo: { id: "5", author: { id: SELF_ID, username: DORI_NAME } } });
   const toOther = botPost({ replyTo: { id: "6", author: { id: "b1", username: "상디" } } });
   expect(botCall(toDori, SELF_ID)).toBe(`replied to ${DORI_NAME}`);
-  expect(botCall(toOther, SELF_ID)).toBeNull();
+  // Room talk still reaches the answerer, which speaks only when it has something to add; `hasContent` drops the rest.
+  expect(botCall(toOther, SELF_ID)).toBe("room talk");
   expect(botCall(callsDori(), SELF_ID)).toBe(`called ${DORI_NAME}`);
 });
 
@@ -171,3 +173,42 @@ test("hasContent refuses blank text and the quote-only line, and keeps a real an
   expect(hasContent("> 빌드가 깨졌다.\n\n상디 말에 답한다.")).toBe(false);
   expect(hasContent(ANSWER)).toBe(true);
 });
+
+test("a message enqueued while the lead is working still posts that message's own answer", () =>
+  withState(async (stateDir) => {
+    const sessionLog = join(stateDir, "lead.jsonl");
+    const assistant = (text: string) =>
+      `${JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text }] } })}\n`;
+    writeFileSync(sessionLog, assistant("첫 답"));
+    const { http, seen } = fakeHttp(() => ok({ id: "99" }));
+    // The pane is working and then goes idle: the test double stands in for the runtime's own list, so the reply loop
+    // reads a status instead of shelling out to hc.
+    let status = "working";
+    const rts = {
+      for: () => ({
+        list: async () => [{ ref: { runtime: "hc", id: "t1t" }, status }],
+        deliver: async () => ({ kind: "delivered" }),
+        read: async () => "",
+      }),
+    } as unknown as ChosenRuntimes;
+    const replies = startDiscordReplies(
+      new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
+      stateDir,
+      { ...config(stateDir), leadPane: "hc:t1t" },
+      undefined,
+      rts,
+    );
+    try {
+      appendFileSync(sessionLog, assistant("이 메시지의 답"));
+      expect(await replies.enqueue({ channel: "c1", messageId: "10", sessionPath: sessionLog })).toBe(true);
+      appendFileSync(sessionLog, assistant("다음 메시지의 답"));
+      await Bun.sleep(200);
+      status = "idle";
+      const deadline = Date.now() + 5_000;
+      while (posts(seen).length === 0 && Date.now() < deadline) await Bun.sleep(20);
+    } finally {
+      replies.stop();
+    }
+    expect(posts(seen)).toHaveLength(1);
+    expect(sent(posts(seen)[0])["content"]).toBe("다음 메시지의 답");
+  }));

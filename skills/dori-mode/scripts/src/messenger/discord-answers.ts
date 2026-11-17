@@ -14,8 +14,8 @@ import { join } from "node:path";
 
 import type { SessionRef } from "../../../../../src/runtime/types.ts";
 import type { DoriConfig } from "../config.ts";
-import { run, runtimesOf } from "../run.ts";
-import { agentStatus, readScreen, sendVerified } from "../sessions.ts";
+import { type ChosenRuntimes, run, runtimesOf } from "../run.ts";
+import { agentStatus, readScreen, sendVerified, statusLookup } from "../sessions.ts";
 import { botAnswerer } from "./discord-bot-replies.ts";
 import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
@@ -30,6 +30,8 @@ type Pending = {
   messageId: string;
   sessionPath: string;
   offset: number;
+  /** Where this message's own turn started, when the pane was idle at the hand-off: an answer before it is not this one's. */
+  ownFrom?: number;
 };
 
 export type ReplyLoop = { readonly stop: () => void };
@@ -114,21 +116,35 @@ export const startDiscordReplies = (
   stateDir: string,
   config: DoriConfig,
   sessionPath: () => Promise<string | undefined> = () => sessionPathFor(config.sessionsDir, config.defaultCwd),
+  rts: ChosenRuntimes = runtimesOf({ run, clock, config }),
 ): ReplyLoop & {
   readonly enqueue: (item: Omit<Pending, "offset">) => Promise<boolean>;
   readonly enqueueBot: (inbound: Inbound) => Promise<boolean>;
 } => {
   const path = pendingPath(stateDir);
-  const rts = runtimesOf({ run, clock, config });
   const ref = leadRef(config);
   let stopped = false;
+  const posted = new Set<string>();
 
   const enqueue = async (item: Omit<Pending, "offset">): Promise<boolean> => {
     if (!ref) return false;
+    // Read before the hand-off: a working pane answers the next prompt in the turn it is already running, so the
+    // answer can land before the hand-off returns. A size read after it would start past that answer, and the next
+    // answer written for a later message would be posted as this one's.
     const size = sessionSize(item.sessionPath);
+    // The status is read through the hand-off's own lookup, so the test double and a real pane agree on where it comes
+    // from: a working pane answers inside the turn it is already running, an idle one starts a turn for this message.
+    const before = (await statusLookup(rts, ref)).status;
     if (!(await handOff(rts, ref, item.sessionPath, item.channel, item.messageId))) return false;
     const pending = readPending(path);
-    writePending(path, [...pending.filter((p) => p.messageId !== item.messageId), { ...item, offset: size }]);
+    // An idle pane starts a turn for this message, so its first answer is this message's. A working pane answers inside
+    // the turn it is already running, and the text it writes there may be for an earlier message: only an answer that
+    // lands while the pane is still working, or after it has gone idle, can be told apart from that one.
+    const own = before === "idle" ? size : undefined;
+    writePending(path, [
+      ...pending.filter((p) => p.messageId !== item.messageId),
+      { ...item, offset: size, ...(own === undefined ? {} : { ownFrom: own }) },
+    ]);
     return true;
   };
 
@@ -163,12 +179,27 @@ export const startDiscordReplies = (
 
   const answer = async (item: Pending): Promise<boolean> => {
     const started = Date.now();
+    let working = false;
     while (!stopped && Date.now() - started < MAX_WAIT_MS) {
       await sleep(POLL_MS);
-      const text = lastAnswer(item.sessionPath, item.offset);
-      if (!text) continue;
+      // A pane that is still working is writing this message's answer; one that has gone idle has finished the turn, and
+      // its last answer is the one for this message. Without a lead ref there is no pane to read, and only the log counts.
+      const status = ref === undefined ? undefined : (await statusLookup(rts, ref)).status;
+      if (status === "working") working = true;
+      // A working pane's turn may still be writing an earlier message's answer: only an answer written while it is
+      // working, or after it has gone idle, is this message's.
+      if (item.ownFrom === undefined && status === "working") continue;
+      const text = lastAnswer(item.sessionPath, item.ownFrom ?? item.offset);
+      if (!text) {
+        if (working && status !== "working") return true;
+        continue;
+      }
+      // The same answer is never posted twice for one message: a retry after a failed post, or a second pass over the
+      // same entry, would put the same words in the room again.
+      if (posted.has(item.messageId)) return true;
       try {
         const ids = await postAnswer(discord, item.channel, item.messageId, text);
+        posted.add(item.messageId);
         note(stateDir, `posted ${ids.length} message(s) for ${item.messageId}`);
       } catch (e) {
         note(stateDir, `post failed for ${item.messageId}: ${(e as Error).message}`);
