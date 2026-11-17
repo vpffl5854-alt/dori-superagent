@@ -151,7 +151,7 @@ describe("watchdog repeat rule", () => {
   test("output that repeats is not a command; a command that repeats still is", () => {
     const prose = Array.from({ length: 6 }, () => "브리프 확인 완료. 대기 중.");
     expect(repeatedScratch(screen(...prose))).toBeUndefined();
-    const loop = Array.from({ length: SAME_COMMAND_THRESHOLD }, () => "bun test ./test/x.test.ts");
+    const loop = Array.from({ length: SAME_COMMAND_THRESHOLD }, () => "❯ bun test ./test/x.test.ts");
     expect(repeatedScratch(screen(...loop))?.rule).toBe("repeat");
   });
 

@@ -56,16 +56,20 @@ export const pathFamily = (path: string): string => {
   return stem === null ? path : (stem[1] ?? "") + (stem[2] ?? "");
 };
 
+// Only a line the pane prints after its prompt marker (`❯ cmd`, `$ cmd`) was typed and run. Everything else on the
+// screen is output - a tool's result, a prompt, a frame, a code block, a paragraph - and output that repeats is a lane
+// doing its job, not a loop.
+const PROMPT_MARKER = /^[^\w/]*[❯$>]\s+/;
+
 const commandLines = (screen: string): string[] =>
   Bun.stripANSI(screen)
     .split("\n")
     .map((line) => line.trim())
-    .map((line) => line.replace(/^[^\w/]*[❯$>]\s+/, "").trim())
+    .filter((line) => PROMPT_MARKER.test(line))
+    .map((line) => line.replace(PROMPT_MARKER, "").trim())
     .filter(Boolean);
 
-// A line the lane typed and ran: it starts with a command word, and it is not prose the pane printed. Everything else
-// on the screen (a tool's result, a prompt, a frame, a paragraph of an answer) is output, and output that repeats is a
-// lane doing its job, not a loop.
+// A line the lane typed and ran: it starts with a command word, and it is not prose the pane printed.
 const COMMAND_SHAPE = /^(?:[a-z][\w.-]*|\/\S+|[A-Z_][A-Z0-9_]*=)/;
 const PROSE = /[.!?]$/;
 
