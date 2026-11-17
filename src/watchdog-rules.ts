@@ -63,6 +63,12 @@ const commandLines = (screen: string): string[] =>
     .map((line) => line.replace(/^[^\w/]*[❯$>]\s+/, "").trim())
     .filter(Boolean);
 
+// A line the lane typed and ran: it starts with a command word, and it is not prose the pane printed. Everything else
+// on the screen (a tool's result, a prompt, a frame, a paragraph of an answer) is output, and output that repeats is a
+// lane doing its job, not a loop.
+const COMMAND_SHAPE = /^(?:[a-z][\w.-]*|\/\S+|[A-Z_][A-Z0-9_]*=)/;
+const PROSE = /[.!?]$/;
+
 // Rule 2: one scratch path written or removed REPEAT_THRESHOLD times, or one short command run SAME_COMMAND_THRESHOLD
 // times, on the visible screen. The screen is the lane's recent history, so its own length is the window.
 export function repeatedScratch(screen: string): WatchdogFinding | undefined {
@@ -79,6 +85,8 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
     }
     if (
       line.length <= SHORT_COMMAND &&
+      COMMAND_SHAPE.test(line) &&
+      !PROSE.test(line) &&
       !TOOL_RESULT_LINE.test(line) &&
       !TOOL_RESULT_TAIL.test(line) &&
       !PROMPT_LINE.test(line) &&
