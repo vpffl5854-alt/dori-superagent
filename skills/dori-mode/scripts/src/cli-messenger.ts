@@ -1,4 +1,6 @@
 /** dori send, presence, inbound and transcribe: the messengers. */
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { type Command, die, envSlackToken, every, slackAuth } from "./cli-context.ts";
 import type { DoriConfig } from "./config.ts";
 import { formatInbound } from "./messenger/discord-message.ts";
@@ -150,6 +152,14 @@ const telegramInbound = async (stateDir: string, minutes: number): Promise<void>
 
 const discordInbound = async (config: DoriConfig): Promise<void> => {
   const stateDir = config.stateDir;
+  // The room's INBOUND lines belong in the log the bridge writes, not in the lead pane's screen.
+  const logger = {
+    log: (line: string): void => {
+      try {
+        appendFileSync(join(stateDir, "..", "logs", "discord-inbound.log"), `${line}\n`);
+      } catch {}
+    },
+  };
   const dcToken = discordToken();
   const me = await discordWhoAmI(dcToken);
   surviveCrashes("discord inbound");
@@ -167,7 +177,9 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
     realTimers,
     me,
     (i) => {
-      console.log(formatInbound(i));
+      // The room is the lane's: the INBOUND line goes to the log file only, so the lead pane is not woken for every
+      // room message it does not answer.
+      logger.log(formatInbound(i));
       // The lead answers the human, and a bot only when it called Dori; other bot posts are logged and left alone.
       if (i.authorIsBot) {
         void replies.enqueueBot(i);
