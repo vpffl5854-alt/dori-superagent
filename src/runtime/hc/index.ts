@@ -97,8 +97,8 @@ export class HcRuntime implements SessionRuntime {
     await closeTab(this.exec, ref.id, this.log);
   }
 
-  /** A terminal opened in this core is not on screen until the herdr app shows it as a tab. */
-  keepAsTab(ref: SessionRef): Promise<void> {
-    return keepAsTab(this.exec, ref.id, this.log);
+  /** A terminal opened in this core is not on screen until the herdr app shows it as a tab, next to `anchor`'s space. */
+  keepAsTab(ref: SessionRef, anchor?: SessionRef): Promise<void> {
+    return keepAsTab(this.exec, ref.id, this.log, anchor?.id);
   }
 }

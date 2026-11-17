@@ -38,13 +38,41 @@ async function tabOf(exec: Exec, terminal: string, log: (line: string) => void):
 }
 
 /** Best effort: a missing app, no open window or a refused command is one stderr line, never the caller's failure. */
-export async function keepAsTab(exec: Exec, terminal: string, log: (line: string) => void): Promise<void> {
+export async function keepAsTab(
+  exec: Exec,
+  terminal: string,
+  log: (line: string) => void,
+  anchor?: string,
+): Promise<void> {
   try {
+    if (anchor !== undefined) {
+      const space = await spaceOf(exec, anchor);
+      // herdr shows a kept terminal in the space on screen, so the anchor's space is selected first: without it a lane
+      // opened from this home lands in whatever space the person happens to be looking at (omomeow, 2026-11-18).
+      if (space !== undefined) await exec(APP, ["do", "space.select", "--id", space]);
+    }
     const res = await exec(APP, ["do", "terminal.keep", "--terminal", terminal]);
     if (res.code !== 0) throw new Error(`${(res.stderr || res.stdout).trim() || `exit ${res.code}`}`);
   } catch (e) {
     log(`dori: herdr-app could not show terminal ${terminal} as a tab (${e instanceof Error ? e.message : String(e)})`);
   }
+}
+
+/** The space a terminal is shown in, or undefined when no window shows it. */
+async function spaceOf(exec: Exec, terminal: string): Promise<string | undefined> {
+  const res = await exec(APP, ["ls"]);
+  if (res.code !== 0) return undefined;
+  try {
+    const parsed = JSON.parse(res.stdout) as { spaces?: unknown };
+    for (const raw of Array.isArray(parsed.spaces) ? parsed.spaces : []) {
+      const space = raw as { id?: unknown };
+      if (typeof space.id !== "string") continue;
+      if (tabs(JSON.stringify({ spaces: [space] })).some((t) => t.terminals.includes(terminal))) return space.id;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 /** Best effort, like keepAsTab: no app tab for this terminal closes nothing and fails nothing. */

@@ -29,6 +29,34 @@ describe("herdr app tabs for hc terminals", () => {
     expect(calls).toEqual([["herdr-app", "do", "terminal.keep", "--terminal", "t7"]]);
   });
 
+  test("keepAsTab selects the anchor's space first, so the tab does not land in the space on screen", async () => {
+    const { calls, exec } = app((argv) =>
+      argv[0] === "ls" && argv[1] === undefined
+        ? ok({
+            spaces: [
+              { id: "spLead", tabs: [{ id: "tb1", terminals: [{ terminal: "t1t" }] }] },
+              { id: "spOther", tabs: [{ id: "tb2", terminals: [{ terminal: "t20" }] }] },
+            ],
+          })
+        : ok({}),
+    );
+    await keepAsTab(exec, "t9", log, "t1t");
+    expect(calls).toEqual([
+      ["herdr-app", "ls"],
+      ["herdr-app", "do", "space.select", "--id", "spLead"],
+      ["herdr-app", "do", "terminal.keep", "--terminal", "t9"],
+    ]);
+  });
+
+  test("keepAsTab keeps the tab as before when the anchor is in no space", async () => {
+    const { calls, exec } = app(() => appLs({ id: "tb1", terminals: ["t1"] }));
+    await keepAsTab(exec, "t7", log, "t99");
+    expect(calls).toEqual([
+      ["herdr-app", "ls"],
+      ["herdr-app", "do", "terminal.keep", "--terminal", "t7"],
+    ]);
+  });
+
   test("keepAsTab logs a refused command and does not throw", async () => {
     const { exec } = app(() => ({ code: 1, stdout: "", stderr: "no window is open" }));
     await keepAsTab(exec, "t7", log);
