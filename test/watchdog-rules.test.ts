@@ -117,6 +117,19 @@ describe("watchdog repeat rule", () => {
     expect(repeatedScratch(screen(...results, "✗ exit 1"))).toBeUndefined();
   });
 
+  test("the lane's opening prompt and the routing line are not commands the lane ran", () => {
+    const prompt = Array.from(
+      { length: 6 },
+      () => "Ask: Read your brief at /Users/jib/.dori-superagent/briefs/discord-chat.md and execute it.",
+    );
+    expect(repeatedScratch(screen(...prompt))).toBeUndefined();
+    const routing = Array.from(
+      { length: 6 },
+      () => "I read this as a room message - answer it. I will stop when posted.",
+    );
+    expect(repeatedScratch(screen(...routing))).toBeUndefined();
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");
