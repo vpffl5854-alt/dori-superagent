@@ -25,6 +25,8 @@ const TOOL_RESULT_LINE = /^[✓✗✕·•]\s/;
 const TOOL_RESULT_TAIL = /\s(?:done|failed)\s·\s/;
 // The prompt a lane is opened with, and the routing line a turn opens with: printed once per turn, not run by the lane.
 const PROMPT_LINE = /^(?:Ask:|I read this as)\s/;
+// The second line of the prompt a lane is opened with, wrapped by the pane: the same words on every turn, not a command.
+const LANE_KEY_LINE = /lane key is [a-z0-9._-]+\.?$/i;
 // A pane's frame line (`│`, `─`, `❯`): drawn by the terminal, never a command the lane ran, and the same on every turn.
 const FRAME_LINE = /^[│┃┆┊╎╏─━═─❯>·•\s]+$/;
 // An ellipsis the pane prints where it cut a line short (`...`), not a command.
@@ -80,6 +82,7 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
       !TOOL_RESULT_LINE.test(line) &&
       !TOOL_RESULT_TAIL.test(line) &&
       !PROMPT_LINE.test(line) &&
+      !LANE_KEY_LINE.test(line) &&
       !FRAME_LINE.test(line) &&
       !ELLIPSIS_LINE.test(line) &&
       !line.includes("[REPORT]") &&

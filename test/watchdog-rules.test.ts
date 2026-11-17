@@ -143,6 +143,11 @@ describe("watchdog repeat rule", () => {
     expect(repeatedScratch(screen(...dots, "…"))).toBeUndefined();
   });
 
+  test("the wrapped second line of the lane prompt is not a command", () => {
+    const line = Array.from({ length: 6 }, () => "execute it. Your lane key is discord-chat.");
+    expect(repeatedScratch(screen(...line))).toBeUndefined();
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");
