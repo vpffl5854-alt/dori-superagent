@@ -4,7 +4,8 @@
     "skills/dori-mode/scripts/src/cli.ts",
     "test/**/*.test.ts",
     "skills/dori-mode/scripts/test/**/*.test.ts",
-    "skills/dori-mode/scripts/test/record-fetch.ts"
+    "skills/dori-mode/scripts/test/record-fetch.ts",
+    "src/cue-bridge/main.ts"
   ],
   "project": [
     "src/**/*.ts",
