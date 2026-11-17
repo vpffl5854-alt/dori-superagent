@@ -130,6 +130,13 @@ describe("watchdog repeat rule", () => {
     expect(repeatedScratch(screen(...routing))).toBeUndefined();
   });
 
+  test("a pane's frame lines are not a command the lane ran", () => {
+    const frame = Array.from({ length: 8 }, () => "│");
+    expect(repeatedScratch(screen(...frame))).toBeUndefined();
+    expect(repeatedScratch(screen(...frame, "────────────────────────────────────────"))).toBeUndefined();
+    expect(repeatedScratch(screen(...frame, "❯"))).toBeUndefined();
+  });
+
   test("a path's random suffix names the same file", () => {
     expect(pathFamily("/tmp/dbgflow-17.ts")).toBe("/tmp/dbgflow.ts");
     expect(pathFamily("/tmp/a.log")).toBe("/tmp/a.log");

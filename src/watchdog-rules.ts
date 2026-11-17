@@ -25,6 +25,8 @@ const TOOL_RESULT_LINE = /^[✓✗✕·•]\s/;
 const TOOL_RESULT_TAIL = /\s(?:done|failed)\s·\s/;
 // The prompt a lane is opened with, and the routing line a turn opens with: printed once per turn, not run by the lane.
 const PROMPT_LINE = /^(?:Ask:|I read this as)\s/;
+// A pane's frame line (`│`, `─`, `❯`): drawn by the terminal, never a command the lane ran, and the same on every turn.
+const FRAME_LINE = /^[│┃┆┊╎╏─━═─❯>·•\s]+$/;
 
 export type WatchdogFinding =
   | { readonly rule: "budget"; readonly key: string; readonly budgetMin: number; readonly elapsedMin: number }
@@ -76,6 +78,7 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
       !TOOL_RESULT_LINE.test(line) &&
       !TOOL_RESULT_TAIL.test(line) &&
       !PROMPT_LINE.test(line) &&
+      !FRAME_LINE.test(line) &&
       !line.includes("[REPORT]") &&
       !line.includes("[LEAD]")
     )
