@@ -15,6 +15,7 @@ import type {
   SubmitResult,
 } from "../types.ts";
 import { deliver, keys, read, typeIntoShell } from "./deliver.ts";
+import { closeTab, keepAsTab } from "./app.ts";
 import { probe } from "./probe.ts";
 import { close, create, list, selfRef, start } from "./sessions.ts";
 
@@ -90,8 +91,14 @@ export class HcRuntime implements SessionRuntime {
     return keys(this.exec, ref.id, names);
   }
 
-  /** Kill then remove; hc has no container, so the scope does not change anything. */
-  close(ref: SessionRef, _scope?: CloseScope): Promise<void> {
-    return close(this.exec, ref.id, this.sleep, this.log);
+  /** Kill then remove; hc has no container, so the scope does not change anything. The app tab showing the terminal goes too. */
+  async close(ref: SessionRef, _scope?: CloseScope): Promise<void> {
+    await close(this.exec, ref.id, this.sleep, this.log);
+    await closeTab(this.exec, ref.id, this.log);
+  }
+
+  /** A terminal opened in this core is not on screen until the herdr app shows it as a tab. */
+  keepAsTab(ref: SessionRef): Promise<void> {
+    return keepAsTab(this.exec, ref.id, this.log);
   }
 }

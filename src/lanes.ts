@@ -45,6 +45,7 @@ export async function startLane(
     { name: key, role: "lane", container: "tab", cwd, env: { DORI_LANE: key, DORI_HOME: d.store.root }, group },
     `${d.agentCmd} ${shq(kickoff)}`,
   );
+  await rt.keepAsTab?.(ref);
 
   const now = d.now();
   const lane: Lane = {

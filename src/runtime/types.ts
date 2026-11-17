@@ -77,8 +77,10 @@ export interface SessionRuntime {
   submitTyped(ref: SessionRef, into: AgentIdentity): Promise<SubmitResult>;
   typeIntoShell(ref: SessionRef, text: string): Promise<boolean>;
   keys(ref: SessionRef, keys: readonly Key[]): Promise<void>;
-  /** herdr: "session" = `pane close <id>`; "container" = `tab close <ref.container>` (pane close when the ref has no container). hc: kill then rm for both. Default "session". */
+  /** herdr: "session" = `pane close <id>`; "container" = `tab close <ref.container>` (pane close when the ref has no container). hc: kill then rm for both, and the app tab showing it. Default "session". */
   close(ref: SessionRef, scope?: CloseScope): Promise<void>;
+  /** hc only: put a terminal this runtime opened on screen as a herdr app tab (best effort). Absent when the runtime's sessions are already on screen. */
+  keepAsTab?(ref: SessionRef): Promise<void>;
 }
 
 /** Id shape of a bare ref: only a herdr pane `w<ws>:p<pane>` may appear without its prefix. */

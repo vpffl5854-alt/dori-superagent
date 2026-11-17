@@ -85,3 +85,46 @@ describe("startLane group fallback", () => {
     expect(run.join(" ")).not.toContain("w9");
   });
 });
+
+describe("hc lanes in the herdr app", () => {
+  const windowOn = (terminals: string[]) => ({
+    code: 0,
+    stdout: JSON.stringify({
+      spaces: [{ tabs: [{ id: "tb-lane", terminals: terminals.map((t) => ({ terminal: t })) }] }],
+    }),
+  });
+
+  test("an opened lane is kept as an app tab, and a refused keep leaves the lane open", async () => {
+    const { w, d, brief } = setup({ runtime: "hc" });
+    w.reviewer = (argv) => (argv[0] === "do" ? { code: 1, stdout: "", stderr: "no window" } : { code: 0, stdout: "" });
+    const lane = await startLane(d, "shown", brief);
+    expect(w.calls.filter((c) => c.cmd === "herdr-app").map((c) => c.argv)).toEqual([
+      ["do", "terminal.keep", "--terminal", lane.paneId],
+    ]);
+    expect(w.hc.sent.map((s) => s.id)).toEqual([lane.paneId]);
+    expect(d.store.lane("shown")!.status).toBe("working");
+  });
+
+  test("a missing herdr-app leaves the lane open", async () => {
+    const { w, d, brief } = setup({ runtime: "hc" });
+    w.reviewer = () => {
+      throw new Error("spawn herdr-app ENOENT");
+    };
+    const lane = await startLane(d, "quiet", brief);
+    expect(d.store.lane("quiet")!.sessionRef).toEqual(lane.sessionRef);
+    expect(w.hc.sent.map((s) => s.id)).toEqual([lane.paneId]);
+  });
+
+  test("done closes the app tab that held the lane", async () => {
+    const { w, d, brief } = setup({ runtime: "hc" });
+    let shown: string[] = [];
+    w.reviewer = (argv) => (argv[0] === "ls" ? windowOn(shown) : { code: 0, stdout: "" });
+    const lane = await startLane(d, "closing", brief);
+    shown = [lane.paneId];
+    await ready(d, "closing", "closed", ["https://github.com/o/r/pull/1"]);
+    await done(d, "closing");
+    const app = w.calls.filter((c) => c.cmd === "herdr-app").map((c) => c.argv);
+    expect(app.at(-1)).toEqual(["do", "tab.close", "--id", "tb-lane"]);
+    expect(w.hc.calls.some((args) => args[0] === "rm" && args[1] === lane.paneId)).toBe(true);
+  });
+});
