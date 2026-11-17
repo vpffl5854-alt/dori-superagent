@@ -31,6 +31,9 @@ const LANE_KEY_LINE = /lane key is [a-z0-9._-]+\.?$/i;
 const FRAME_LINE = /^[│┃┆┊╎╏─━═─❯>·•\s]+$/;
 // An ellipsis the pane prints where it cut a line short (`...`), not a command.
 const ELLIPSIS_LINE = /^[.…]+$/;
+// `cd` / `pwd` in one folder change nothing about where a lane is in its work, so running them between every step is
+// navigation, not the same command four times (2026-11-18: `cd /Users/jib/.dori-superagent` closed the room lane).
+const NAVIGATION = /^(?:cd|pwd)(?:\s|$)/;
 
 export type WatchdogFinding =
   | { readonly rule: "budget"; readonly key: string; readonly budgetMin: number; readonly elapsedMin: number }
@@ -97,6 +100,7 @@ export function repeatedScratch(screen: string): WatchdogFinding | undefined {
       !LANE_KEY_LINE.test(line) &&
       !FRAME_LINE.test(line) &&
       !ELLIPSIS_LINE.test(line) &&
+      !NAVIGATION.test(line) &&
       !line.includes("[REPORT]") &&
       !line.includes("[LEAD]")
     )

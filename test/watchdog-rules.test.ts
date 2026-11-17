@@ -108,6 +108,12 @@ describe("watchdog repeat rule", () => {
     expect(found.path).toContain("same command");
   });
 
+  test("cd and pwd repeated are navigation, not a loop", () => {
+    const nav = Array.from({ length: 8 }, () => "$ cd /Users/jib/.dori-superagent");
+    expect(repeatedScratch(screen(...nav))).toBeUndefined();
+    expect(repeatedScratch(screen(...Array.from({ length: 8 }, () => "$ pwd")))).toBeUndefined();
+  });
+
   test("a tool's own result lines are not a command the lane ran", () => {
     const results = Array.from({ length: 20 }, () => "✓ <1s");
     expect(repeatedScratch(screen(...results))).toBeUndefined();
