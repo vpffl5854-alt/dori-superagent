@@ -48,10 +48,11 @@ export async function startLane(
     (self?.runtime === rt.kind ? self.group : undefined) ??
     (rt.kind === "herdr" ? await rt.createGroup("dori", cwd) : groupId(d.store.root));
   const kickoff = `Read your brief at ${briefPath} and execute it. Your lane key is ${key}.`;
+  const agent = d.laneModel === undefined ? d.agentCmd : `${d.agentCmd} --model ${d.laneModel}`;
   const ref = await openSession(
     rt,
     { name: key, role: "lane", container: "tab", cwd, env: { DORI_LANE: key, DORI_HOME: d.store.root }, group },
-    `${d.agentCmd} ${shq(kickoff)}`,
+    `${agent} ${shq(kickoff)}`,
   );
   await rt.keepAsTab?.(ref, self);
 

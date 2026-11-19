@@ -28,6 +28,8 @@ export type Deps = {
   readonly exec: Exec;
   readonly now: () => number;
   readonly agentCmd: string;
+  /** The model a new lane opens with, from config; absent means the agent's own default. */
+  readonly laneModel?: string;
   readonly doriCmd: string;
   readonly host: () => HostLoad;
   readonly usage: Usage;
@@ -54,6 +56,7 @@ export const defaultDeps = (): Deps => {
     exec: spawnExec,
     now: Date.now,
     agentCmd: process.env["DORI_AGENT_CMD"] ?? "omo",
+    ...(laneModel(store.root) === undefined ? {} : { laneModel: laneModel(store.root) as string }),
     doriCmd: process.env["DORI_CMD"] ?? `DORI_HOME=${shq(store.root)} bun ${shq(SELF)}`,
     host: () => ({ load1: loadavg()[0] ?? 0, cores: cpus().length, memFreePct: memFreePct() }),
     usage: new Telemetry(store.root),
@@ -62,6 +65,24 @@ export const defaultDeps = (): Deps => {
 
 /** `DORI_PROMPTS_DIR` when set, else the repo's `prompts/`. */
 export const promptsDir = (): string => process.env["DORI_PROMPTS_DIR"] || PROMPTS;
+
+/**
+ * The model a lane runs on: `DORI_LANE_MODEL`, else `defaultModel` in this home's config.json, else nothing.
+ * Without this a lane ran on `omo`'s own default whatever the config said (2026-11-19).
+ */
+export const laneModel = (storeRoot: string): string | undefined => {
+  const fromEnv = nonEmpty(process.env["DORI_LANE_MODEL"]);
+  if (fromEnv !== undefined) return fromEnv;
+  try {
+    const raw = JSON.parse(readFileSync(join(storeRoot, "config.json"), "utf8")) as { defaultModel?: unknown };
+    return typeof raw.defaultModel === "string" && raw.defaultModel ? raw.defaultModel : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value;
 
 export const prompt = (name: string, vars: Record<string, string>): string =>
   readFileSync(join(promptsDir(), name), "utf8").replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`);

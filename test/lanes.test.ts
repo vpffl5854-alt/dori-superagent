@@ -16,6 +16,12 @@ describe("lanes", () => {
     await expect(startLane(d, "fix-login", brief, { group: "w1" })).rejects.toThrow(Refusal);
   });
 
+  test("a lane opens on the model this home's config names", async () => {
+    const { w, d, brief } = setup();
+    const lane = await startLane({ ...d, laneModel: "anthropic/claude-opus-5-5" }, "modelled", brief, { group: "w1" });
+    expect(w.panes.get(lane.paneId)!.ran[0]).toStartWith("omo --model anthropic/claude-opus-5-5 'Read your brief at ");
+  });
+
   test("start refuses the role names lead and duty as lane keys before it writes or opens anything", async () => {
     const { w, d, lead, brief } = setup();
     for (const key of ["lead", "duty"]) {
