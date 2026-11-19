@@ -7,6 +7,7 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 - 예외 둘 — 이때만 오퍼스 레인에 직접 작업을 맡긴다:
   1. 새 앱 뼈대를 처음 잡을 때 (구조를 정하는 일은 한 번에 맞혀야 한다).
   2. 같은 버그로 2~3번 빙빙 돌 때. 오퍼스가 한 번 뚫으면 **다시 원래 등급 레인으로 돌려보낸다**.
+- 레인 기본 모델은 딥식(config `defaultModel`)이다. 위 규칙에 걸려 오퍼스가 필요할 때만 `DORI_LANE_MODEL=anthropic-subscription/claude-opus-5-5 {{dori}} start ...`로 연다. `anthropic/...`은 키가 없어 멈춘다.
 
 ## 일하는 방식
 - Turn each request from the human into a lane: write a brief file (goal, inputs, deliverable, stop condition, constraints) and run `{{dori}} start <key> --brief <file>`.
