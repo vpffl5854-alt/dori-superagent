@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
-import { prompt, type Deps } from "./harness.ts";
+import { chatLanes, prompt, type Deps } from "./harness.ts";
 import { settled, tellLead, type SendResult } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
 import { runHook } from "./hooks.ts";
@@ -139,4 +139,9 @@ export async function done(d: Deps, key: string): Promise<void> {
   lane.status = "done";
   lane.log.push({ at: d.now(), kind: "done", text: "closed by lead" });
   d.store.saveLane(lane);
+  const chat = chatLanes(d.store.root);
+  const open = d.store
+    .lanes()
+    .filter((l) => !chat.includes(l.key) && (l.status === "working" || l.status === "waiting" || l.status === "ready"));
+  if (open.length === 0) void runHook(d, "onIdle", { key });
 }

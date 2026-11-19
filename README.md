@@ -176,7 +176,7 @@ Then `gh pr checks` must return at least one check, every check must be `pass` o
 
 ### Hooks for your own tooling
 
-`$DORI_HOME/config.json` may name argv templates under `hooks`: `onReady`, `onReport` and `onLost` run in the background when those events happen (with `{key}`, `{text}` and `{evidence}` filled in per argument), and `reviewCommand` replaces the built-in reviewer as long as it prints the same `VERDICT:` line. `DORI_PROMPTS_DIR` points the harness at your own copies of the prompts.
+`$DORI_HOME/config.json` may name argv templates under `hooks`: `onReady`, `onReport`, `onLost` and `onIdle` (the last open lane closed) run in the background when those events happen (with `{key}`, `{text}` and `{evidence}` filled in per argument), and `reviewCommand` replaces the built-in reviewer as long as it prints the same `VERDICT:` line. `DORI_PROMPTS_DIR` points the harness at your own copies of the prompts.
 
 ## Dori mode in depth
 

@@ -9,6 +9,8 @@ export type Hooks = {
   readonly onReady?: ArgvTemplate;
   readonly onReport?: ArgvTemplate;
   readonly onLost?: ArgvTemplate;
+  /** Runs when `done` closes the last open work lane (lanes listed in `chatLanes` do not count). */
+  readonly onIdle?: ArgvTemplate;
   readonly reviewCommand?: ArgvTemplate;
 };
 
@@ -18,7 +20,7 @@ export type HookVars = Partial<Record<"key" | "text" | "evidence" | "pr" | "repo
 /** `$DORI_HOME/config.json` is present but its `hooks` value is not the documented shape. */
 export class ConfigError extends Error {}
 
-const NAMES: readonly HookName[] = ["onReady", "onReport", "onLost", "reviewCommand"];
+const NAMES: readonly HookName[] = ["onReady", "onReport", "onLost", "onIdle", "reviewCommand"];
 
 function template(name: string, value: unknown): ArgvTemplate {
   if (!Array.isArray(value) || value.length === 0)

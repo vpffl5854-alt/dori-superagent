@@ -73,9 +73,23 @@ export const promptsDir = (): string => process.env["DORI_PROMPTS_DIR"] || PROMP
 export const laneModel = (storeRoot: string): string | undefined => {
   const fromEnv = nonEmpty(process.env["DORI_LANE_MODEL"]);
   if (fromEnv !== undefined) return fromEnv;
+  const model = configKey(storeRoot, "defaultModel");
+  return typeof model === "string" && model ? model : undefined;
+};
+
+/**
+ * Lanes that stay open for conversation (`chatLanes` in config.json): they never count as open work, so closing the
+ * last work lane still reads as idle while the chat lane keeps running.
+ */
+export const chatLanes = (storeRoot: string): readonly string[] => {
+  const keys = configKey(storeRoot, "chatLanes");
+  return Array.isArray(keys) ? keys.filter((k): k is string => typeof k === "string") : [];
+};
+
+const configKey = (storeRoot: string, key: string): unknown => {
   try {
-    const raw = JSON.parse(readFileSync(join(storeRoot, "config.json"), "utf8")) as { defaultModel?: unknown };
-    return typeof raw.defaultModel === "string" && raw.defaultModel ? raw.defaultModel : undefined;
+    const raw: unknown = JSON.parse(readFileSync(join(storeRoot, "config.json"), "utf8"));
+    return typeof raw === "object" && raw !== null ? Reflect.get(raw, key) : undefined;
   } catch {
     return undefined;
   }
