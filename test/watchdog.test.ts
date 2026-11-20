@@ -37,6 +37,26 @@ describe("duty watchdog", () => {
     expect((await dutyTick(d)).filter((e) => e.lane === "slow-lane")).toEqual([]);
   });
 
+  test("a chat lane is never closed for time, though a work lane at the same age is", async () => {
+    const { w, d, lead, brief } = setup();
+    writeFileSync(join(d.store.root, "config.json"), JSON.stringify({ chatLanes: ["discord-chat"] }));
+    const chat = await startLane(d, "discord-chat", brief, { group: "w1", budgetMin: 10 });
+    const work = await startLane(d, "work-lane", brief, { group: "w1", budgetMin: 10 });
+    w.panes.get(chat.paneId)!.status = "working";
+    w.panes.get(work.paneId)!.status = "working";
+    w.clock = chat.createdAt + 60 * MIN;
+    const events = await dutyTick(d);
+    expect(events.filter((e) => e.lane === "discord-chat")).toEqual([]);
+    expect(w.panes.has(chat.paneId)).toBe(true);
+    expect(d.store.lane("discord-chat")?.status).not.toBe("lost");
+    expect(events).toContainEqual({
+      lane: "work-lane",
+      action: "watchdog-budget",
+      detail: expect.stringContaining("[WATCHDOG] work-lane"),
+    });
+    expect(lead.received.join(" ")).not.toContain("[WATCHDOG] discord-chat");
+  });
+
   test("a READY lane is never closed for time", async () => {
     const { w, d, lead, brief } = setup();
     const lane = await startLane(d, "done-lane", brief, { group: "w1", budgetMin: 5 });

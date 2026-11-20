@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Deps } from "./harness.ts";
+import { chatLanes } from "./harness.ts";
 import { tellLead } from "./inbox.ts";
 import { RESERVED_KEYS, type Lane } from "./store-types.ts";
 import { backupLane } from "./watchdog.ts";
@@ -160,8 +161,10 @@ export async function runHardLimit(
   }
 }
 
-// The role names never closed, plus the ids of the registered lead/duty/loop sessions when those are named.
+// The role names never closed, plus the ids of the registered lead/duty/loop sessions when those are named, plus the
+// chat lanes: a chat lane stays open for conversation, so the hard wall-clock limit would close a healthy one on a
+// schedule. Its own loop rules still apply, because a stuck pane is a real fault there too.
 export const keepNames = (d: Deps): string[] => {
   const ids = Object.values(d.store.roles()).map((ref) => ref.id);
-  return [...RESERVED_KEYS, ...ids].map((n) => n.toLowerCase());
+  return [...RESERVED_KEYS, ...ids, ...chatLanes(d.store.root)].map((n) => n.toLowerCase());
 };

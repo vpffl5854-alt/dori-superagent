@@ -7,6 +7,7 @@ import {
   elapsedMin,
   type HardLimitOptions,
   hardLimitPass,
+  keepNames,
   overLimit,
   parsePaneRows,
   runHardLimit,
@@ -202,6 +203,14 @@ describe("hard limit pass", () => {
     });
     expect(await hardLimitPass(d, { ...opts(), keep: [...KEEP, "t9"] })).toEqual([]);
     expect(closed).toEqual([]);
+  });
+
+  test("a chat lane name is kept, so the hard limit never closes it", async () => {
+    const { d } = setup({ runtime: "hc" });
+    writeFileSync(join(d.store.root, "config.json"), JSON.stringify({ chatLanes: ["discord-chat"] }));
+    const names = keepNames(d);
+    expect(names).toContain("discord-chat");
+    expect(names).toContain("lead");
   });
 
   test("a failed hc ls is logged and the next pass still closes", async () => {

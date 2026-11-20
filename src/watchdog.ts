@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { Deps } from "./harness.ts";
+import { type Deps, chatLanes } from "./harness.ts";
 import { tellLead } from "./inbox.ts";
 import type { Lane } from "./store-types.ts";
 import {
@@ -71,7 +71,10 @@ export async function backupLane(d: Deps, lane: Lane, at: number): Promise<strin
 // The finding for a lane this tick, if any. A lane already closed by the watchdog is never a finding again.
 export async function watchdogFinding(d: Deps, lane: Lane): Promise<WatchdogFinding | undefined> {
   if (lane.watchdog) return undefined;
-  const over = budgetOverrun(lane, d.now());
+  // A chat lane is meant to outlive any budget: it stays open for conversation and is idle most of the time, so the
+  // wall-clock rule would close a healthy lane at 1.5x its 40-minute default every hour. Work lanes keep the rule;
+  // the loop checks below still apply to chat lanes, because a stuck pane is a real fault there too.
+  const over = chatLanes(d.store.root).includes(lane.key) ? undefined : budgetOverrun(lane, d.now());
   if (over) return over;
   // A screen that cannot be read is no evidence of a loop; the budget rule above still applies.
   const screen = await d.runtimes
