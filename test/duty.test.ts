@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { dutyTick } from "../src/duty.ts";
+import type { Deps } from "../src/harness.ts";
 import { send } from "../src/inbox.ts";
 import { report, startLane } from "../src/lanes.ts";
 import { setup } from "./harness-setup.ts";
 import { href } from "./fake.ts";
+
+const config = (d: Deps, value: unknown) => writeFileSync(join(d.store.root, "config.json"), JSON.stringify(value));
 
 describe("duty loop", () => {
   test("nudges an idle lane at 10 and 20 minutes, escalates at 40, and ignores WAITING lanes", async () => {
@@ -30,6 +35,18 @@ describe("duty loop", () => {
     await report(d, "blocked-on-ci", "WAITING: CI", "waiting");
     w.clock += 60 * 60_000;
     expect((await dutyTick(d)).filter((e) => e.lane === "blocked-on-ci")).toEqual([]);
+  });
+
+  test("a chat lane is never nudged or escalated, because its brief forbids READY", async () => {
+    const { w, d, lead, brief } = setup();
+    config(d, { chatLanes: ["discord-chat"] });
+    const lane = await startLane(d, "discord-chat", brief, { group: "w1", budgetMin: 600 });
+    w.panes.get(lane.paneId)!.status = "idle";
+    for (const min of [10, 20, 40, 120]) {
+      w.clock = lane.createdAt + min * 60_000;
+      expect((await dutyTick(d)).filter((e) => e.lane === "discord-chat")).toEqual([]);
+    }
+    expect(lead.received.join(" ")).not.toContain("[ESCALATE discord-chat]");
   });
 
   test("a failing inbox flush on one pane does not stop the loop for the other panes", async () => {

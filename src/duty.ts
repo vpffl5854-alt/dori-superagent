@@ -1,5 +1,5 @@
 import { DeliveryUncertain, failureDetail } from "./delivery.ts";
-import { type Deps, prompt } from "./harness.ts";
+import { type Deps, chatLanes, prompt } from "./harness.ts";
 import { runHook } from "./hooks.ts";
 import { flushInbox, sendOrThrow, tellLead } from "./inbox.ts";
 import { Refusal } from "./refusal.ts";
@@ -76,6 +76,10 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
         continue;
       }
       if (lane.status === "waiting" || st === "blocked" || st === "error") continue;
+      // A chat lane answers each message and then sits idle by design: silence is its normal state, not a stall. Its
+      // brief forbids the READY this escalation waits for, so nudging it asks for a report it must not send and
+      // escalates forever. `chatLanes` already means "stays open for conversation" (harness.ts), so honour it here.
+      if (chatLanes(d.store.root).includes(lane.key)) continue;
       const idleMin = (now - lane.lastActivityAt) / 60_000;
       const due = NUDGE_MINUTES[lane.nudges];
       if (due === undefined || idleMin < due) continue;
