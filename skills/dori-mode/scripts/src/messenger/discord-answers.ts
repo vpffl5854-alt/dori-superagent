@@ -34,6 +34,10 @@ type Pending = {
   text?: string;
   /** Who wrote the message, shown to the pane so it knows whose words it is answering. */
   author?: string;
+  /** How the message reached the room: a reply names the post it answers, a mention names who called. The lane
+   * answers a reply or a mention directly, and plain room text only when it has something to add. */
+  mentions?: readonly string[];
+  replyToAuthor?: string;
   /** Where this message's own turn started, when the pane was idle at the hand-off: an answer before it is not this one's. */
   ownFrom?: number;
 };
@@ -91,13 +95,22 @@ const handOff = async (
   messageId: string,
   author?: string,
   text?: string,
+  signal?: { readonly mentions?: readonly string[]; readonly replyToAuthor?: string },
 ): Promise<boolean> => {
   const status = await agentStatus(rts, ref);
   if (status === undefined || status === "shell" || status === "gone") return false;
   if (await draftPresent(rts, ref)) return false;
   const body = text?.trim() ? `\n본문: ${text.trim()}` : `\n원문은 위 세션기록에서 읽으세요: ${sessionPath}`;
+  // The lane answers differently depending on how the message reached it: a reply or a mention is a direct call to
+  // answer, plain room text is not. The distinction is carried here, not inferred from the text body, so a mention
+  // that names the bot by its display name still reads as a call.
+  const signalLine = signal?.replyToAuthor
+    ? `\n형식: 답장(${JSON.stringify(signal.replyToAuthor)}의 글에 대한 답장)`
+    : signal?.mentions?.length
+      ? `\n형식: 맨션(${signal.mentions.join(", ")}을 맨션)`
+      : "\n형식: 방 잡담(직접 호출 아님)";
   const prompt =
-    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${author}]`}${body}\n` +
+    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${author}]`}${body}${signalLine}\n` +
     "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰세요.";
   return (await sendVerified(rts, clock, ref, prompt)) !== "failed";
 };
@@ -129,7 +142,20 @@ export const startDiscordReplies = (
     // The status is read through the hand-off's own lookup, so the test double and a real pane agree on where it comes
     // from: a working pane answers inside the turn it is already running, an idle one starts a turn for this message.
     const before = (await statusLookup(rts, ref)).status;
-    if (!(await handOff(rts, ref, item.sessionPath, item.channel, item.messageId, item.author, item.text)))
+    if (
+      !(await handOff(
+        rts,
+        ref,
+        item.sessionPath,
+        item.channel,
+        item.messageId,
+        item.author,
+        item.text,
+        item.mentions?.length || item.replyToAuthor
+          ? { ...(item.mentions ? { mentions: item.mentions } : {}), ...(item.replyToAuthor ? { replyToAuthor: item.replyToAuthor } : {}) }
+          : undefined,
+      ))
+    )
       return false;
     const pending = readPending(path);
     // An idle pane starts a turn for this message, so its first answer is this message's. A working pane answers inside
