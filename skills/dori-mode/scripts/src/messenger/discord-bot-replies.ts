@@ -17,14 +17,30 @@ import { splitForDiscord } from "./discord-reply.ts";
 /** The name Dori answers to when a bot calls it in the room. */
 export const DORI_NAME = "dori";
 
+/** A mention row counts as Dori when its name or id says so: the bot's username is "Dori Dori", and a mention row
+ * carries either the username or the numeric id, so a plain equality against "dori" misses both. */
+export const isDoriMention = (mention: { readonly id?: string; readonly username?: string } | string): boolean => {
+  const id = typeof mention === "string" ? mention : (mention.username ?? mention.id ?? "");
+  const lowered = id.toLowerCase();
+  return lowered === DORI_NAME || lowered === "dori dori" || lowered === "1560538193735188561";
+};
+
 /** How many of one bot's calls in one channel are answered in the room before it is left to the lead. */
 export const BOT_REPLY_BUDGET = 6;
 
 /** The answer that has no content, which the room must never receive. */
 export const EMPTY_BOT_REPLY = /^\s*>\s[^\n]*\n+\s*\S+\s*말에 답한다\.?\s*$/;
 
-/** True when `text` is something a person would read: not blank, and not the quote-only "말에 답한다" line. */
-export const hasContent = (text: string): boolean => text.trim() !== "" && !EMPTY_BOT_REPLY.test(text);
+/** Lines that are the lane's own bookkeeping, not an answer: they describe the lane's waiting state instead of
+ * replying to the message. The room saw one of these verbatim (2026-11-21 14:59, "(봇 리액션이라 답·메모 없이 대기)"),
+ * which read as the lane calling a person a bot. Any parenthesised self-note or a bare waiting line is dropped. */
+export const INTERNAL_NOTE =
+  /^\s*\(?[^()\n]{0,40}(봇 리액션|답·메모 없이|메모 없이 대기|대기 중|조용히 기다|원문은 위 세션기록)[^()\n]{0,40}\)?\s*[.。]?\s*$/;
+
+/** True when `text` is something a person would read: not blank, not the quote-only "말에 답한다" line, and not one of
+ * the lane's own bookkeeping notes. */
+export const hasContent = (text: string): boolean =>
+  text.trim() !== "" && !EMPTY_BOT_REPLY.test(text) && !text.split("\n").every((l) => l.trim() === "" || INTERNAL_NOTE.test(l));
 
 /**
  * Why this bot post deserves an answer, or null when it is bot-to-bot chatter that only gets logged.
@@ -34,8 +50,12 @@ export const botCall = (
   inbound: Pick<Inbound, "author" | "text" | "mentions" | "replyToAuthor">,
   selfId: string,
 ): string | null => {
-  const named = inbound.mentions?.some((name) => name.toLowerCase() === DORI_NAME) ?? false;
-  const called = named || inbound.text.toLowerCase().includes(`@${DORI_NAME}`);
+  const named = inbound.mentions?.some(isDoriMention) ?? false;
+  const called =
+    named ||
+    inbound.text.toLowerCase().includes(`@${DORI_NAME}`) ||
+    // A raw id mention (`<@1560538193735188561>`) carries no `@dori` text, so match the id form too.
+    /<@!?1560538193735188561>/.test(inbound.text);
   const replied =
     selfId !== "" && (inbound.replyToAuthor === selfId || inbound.replyToAuthor?.toLowerCase() === DORI_NAME);
   if (replied) return `replied to ${DORI_NAME}`;

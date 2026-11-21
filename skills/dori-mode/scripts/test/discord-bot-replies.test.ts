@@ -169,9 +169,35 @@ test("a bot that replies to Dori's own post is answered; another bot's post is s
   expect(botCall(callsDori(), SELF_ID)).toBe(`called ${DORI_NAME}`);
 });
 
+test("a person's id-mention by the bot's display name counts as a call, not room talk", () => {
+  // 2026-11-21 15:00: the room saw a person's direct mention go unanswered. The mention row carried the username
+  // "Dori Dori" and the text carried the raw id form `<@1560538193735188561>`; neither matched "dori", so the
+  // message fell through to room talk and its budget-spent author silenced it.
+  const person = toInbound(
+    {
+      id: "11",
+      channel_id: "c1",
+      guild_id: "g1",
+      author: { id: "u1", username: "sseritwo_51107" },
+      content: "<@1560538193735188561>  미친거니? 내가봇이야?",
+      mentions: [{ id: "1560538193735188561", username: "Dori Dori" }],
+    },
+    SELF_ID,
+  );
+  if (person === null) throw new Error("toInbound dropped a person's id-mention");
+  expect(person.authorIsBot).toBe(false);
+  expect(botCall(person, SELF_ID)).toBe(`called ${DORI_NAME}`);
+});
+
+test("a lane's own waiting note never reaches the room", () => {
+  expect(hasContent("(봇 리액션이라 답·메모 없이 대기)")).toBe(false);
+  expect(hasContent("(봇 리액션이라 답·메모 없이 대기)\n")).toBe(false);
+  expect(hasContent("브리프 읽었어. 넘겨받은 방 글이 없어 기다리는 중이야.")).toBe(true);
+});
+
 test("hasContent refuses blank text and the quote-only line, and keeps a real answer", () => {
   expect(hasContent("")).toBe(false);
-  expect(hasContent("> 빌드가 깨졌다.\n\n상디 말에 답한다.")).toBe(false);
+  expect(hasContent("(봇 리액션이라 답·메모 없이 대기)")).toBe(false);
   expect(hasContent(ANSWER)).toBe(true);
 });
 
