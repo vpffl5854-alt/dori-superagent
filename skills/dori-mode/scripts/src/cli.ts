@@ -6,7 +6,7 @@ import { journalCommands, journalErrors } from "./cli-journal.ts";
 import { laneCommands } from "./cli-lanes.ts";
 import { messengerCommands, messengerErrors } from "./cli-messenger.ts";
 import { opsCommands } from "./cli-ops.ts";
-import { huntCommands } from "./cli-hunt.ts";
+import { bountyCommands, huntCommands } from "./cli-hunt.ts";
 import { incidentsCommands } from "./cli-incidents.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
@@ -70,6 +70,7 @@ const USAGE = `dori <command> [options]
                                        "everything in the world" slots: random Korean Wikipedia topics, script, lead image
   sns scrape <platform> <handle> | run [--heal] | heal
                                        public YouTube/Instagram/Threads/TikTok profiles; heal rewrites a broken selector
+  bounty [--report]                    paying GitHub issues (Algora) a Mac lane could win; --report tells owner + backlog
   incidents [--report]                 repeating faults in Dori's own logs; --report files issue + backlog + tells owner
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
@@ -140,6 +141,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...shortsCommands,
   ...snsCommands,
   ...incidentsCommands,
+  ...bountyCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 
