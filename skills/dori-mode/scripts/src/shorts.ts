@@ -31,6 +31,8 @@ export type ShortsConfig = {
   /** Sends a text `{text}` / a video `{file}` with `{caption}` to `{chat}`, when no DORI_TELEGRAM_TOKEN is set. */
   readonly sendTextArgv?: ArgvTemplate;
   readonly sendVideoArgv?: ArgvTemplate;
+  /** The owner's interests: YouTube searches whose popular titles steer the trend topics (`shorts trend-topics`). */
+  readonly interests?: readonly string[];
 };
 
 export type Script = { readonly title: string; readonly lines: readonly string[] };

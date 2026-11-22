@@ -1,13 +1,15 @@
 /** dori shorts topics | make | render: the shorts factory (src/shorts.ts, src/shorts-run.ts). */
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
-import { fill } from "./config.ts";
+import { configPath, fill } from "./config.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { Telegram, type TgTarget } from "./messenger/telegram.ts";
 import { realClock, run } from "./run.ts";
 import { jobId, parseScript, parseTopics, ShortsError, type ShortsConfig, topicsMessage } from "./shorts.ts";
-import { extractJson, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
+import { applySetting, parseTime, SettingError, settingsText, viewSettings } from "./shorts-settings.ts";
+import { parseHeadwords, trendPrompt, trendTitles } from "./shorts-trend.ts";
+import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
 import { prepareJob, renderAndCheck, shortsPaths } from "./shorts-run.ts";
 
 type Sender = { text(text: string): Promise<string>; video(file: string, caption: string): Promise<string> };
@@ -75,6 +77,27 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       return await finish(cfg, paths, job, values["no-send"] === true);
     }
     if (sub === "wiki-topics") return void console.log((await randomTopics(fetchHttp)).join("\n"));
+    if (sub === "trend-topics") {
+      // Two topics steered by what is popular in the owner's interests, the rest from "everything in the world".
+      const titles = trendTitles(join(config.stateDir, "sns", "latest"), cfg.interests ?? [], Date.now());
+      const picked: string[] = [];
+      if (titles.length > 0 && cfg.omo) {
+        const r = await run(
+          [cfg.omo, "--model", cfg.scriptModel ?? config.defaultModel, "-p", trendPrompt(titles, cfg.interests ?? [])],
+          {
+            timeoutMs: 180_000,
+          },
+        );
+        for (const word of parseHeadwords(r.out).sort(() => Math.random() - 0.5)) {
+          if (picked.length >= 2) break;
+          const page = await wikiPage(fetchHttp, word).catch(() => null);
+          if (page && page.extract.length >= MIN_EXTRACT && !picked.includes(page.title)) picked.push(page.title);
+        }
+      }
+      for (const t of await randomTopics(fetchHttp)) if (picked.length < 3 && !picked.includes(t)) picked.push(t);
+      return void console.log(picked.join("\n"));
+    }
+    if (sub === "config") return await settings(positionals.slice(1), config.shorts ?? {});
     if (sub === "wiki-script") {
       const [, title = die("wiki-script needs a title"), out = die("wiki-script needs an output path")] = positionals;
       const prompt = scriptPrompt(await wikiPage(fetchHttp, title));
@@ -127,6 +150,46 @@ const autoTopic = async (cfg: ShortsConfig): Promise<string> => {
   const topics = parseTopics(r.out);
   if (r.code !== 0 || topics.length === 0) die(`SHORTS_FAILED topics slot gave nothing (exit ${r.code})`);
   return topics[Math.floor(Math.random() * topics.length)] as string;
+};
+
+const PLIST = join(process.env["HOME"] ?? "", "Library", "LaunchAgents", "com.dori.shorts-daily.plist");
+const SELF_CLI = [process.execPath, "run", join(import.meta.dir, "cli.ts")];
+
+const dailyTime = async (): Promise<string> => {
+  const read = async (k: string) => (await run(["plutil", "-extract", `StartCalendarInterval.${k}`, "raw", PLIST])).out;
+  const [h, m] = [await read("Hour"), await read("Minute")];
+  return h && m ? `${h.padStart(2, "0")}:${m.padStart(2, "0")}` : "예약 없음";
+};
+
+/** `shorts config` shows the settings; `shorts config <key> <value>` changes one, backing the config file up first. */
+const settings = async ([key, ...rest]: readonly string[], cfg: ShortsConfig) => {
+  if (!key) return void console.log(settingsText(viewSettings(cfg), await dailyTime()));
+  const value = rest.join(" ");
+  try {
+    if (key === "time") {
+      const { hour, minute } = parseTime(value);
+      for (const [k, n] of [
+        ["Hour", hour],
+        ["Minute", minute],
+      ] as const)
+        await run(["plutil", "-replace", `StartCalendarInterval.${k}`, "-integer", String(n), PLIST]);
+      const uid = String(process.getuid?.() ?? "");
+      await run(["launchctl", "bootout", `gui/${uid}/com.dori.shorts-daily`]);
+      const r = await run(["launchctl", "bootstrap", `gui/${uid}`, PLIST]);
+      if (r.code !== 0) die(`SHORTS_CONFIG_FAILED launchd: ${r.err.slice(0, 160)}`);
+      return void console.log(`SHORTS_CONFIG time=${await dailyTime()}`);
+    }
+    const next = applySetting(cfg, key, value, SELF_CLI, existsSync);
+    const path = configPath();
+    copyFileSync(path, `${path}.bak-shorts-config-${new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15)}`);
+    const all = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    writeFileSync(path, `${JSON.stringify({ ...all, shorts: next }, null, 2)}\n`);
+    console.log(`SHORTS_CONFIG ${key}=${value}`);
+    console.log(settingsText(viewSettings(next), await dailyTime()));
+  } catch (e) {
+    if (e instanceof SettingError) die(`SHORTS_CONFIG_REFUSED ${e.message}`);
+    throw e;
+  }
 };
 
 export const shortsCommands: Readonly<Record<string, Command>> = { shorts };

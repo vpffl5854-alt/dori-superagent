@@ -69,5 +69,23 @@
         "min": 1
       }
     }
+  },
+  "youtube-search": {
+    "url": "https://www.youtube.com/results?search_query={handle}&sp=CAMSAhAB",
+    "fields": {
+      "link": {
+        "selector": "a#video-title",
+        "attr": "href",
+        "pattern": "^/watch\\?v=[\\w-]{11}",
+        "min": 5
+      },
+      "title": {
+        "selector": "a#video-title",
+        "attr": "text",
+        "pattern": "\\S{2,}",
+        "min": 5,
+        "pair": "link"
+      }
+    }
   }
 }

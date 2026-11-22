@@ -62,6 +62,8 @@ const USAGE = `dori <command> [options]
   shorts make (--auto|--topic T|--pick N) [--script FILE] [--no-send]
                                        script -> voice -> images -> MoviePy render -> check -> Telegram video
   shorts render <job>                  render and check an existing job again (hooks.render)
+  shorts config [<key> <value>]        show or change voice, background, topics, interests, maxSeconds, font, time
+  shorts trend-topics                  topics steered by popular YouTube titles for config shorts.interests
   shorts wiki-topics | wiki-script <title> <out> | wiki-image <title> <out>
                                        "everything in the world" slots: random Korean Wikipedia topics, script, lead image
   sns scrape <platform> <handle> | run [--heal] | heal

@@ -34,6 +34,7 @@ export const withSelector = (rules: Rules, platform: string, field: string, sele
 export const saveRules = (rules: Rules, path = SELECTORS_PATH): void =>
   writeFileSync(path, `${JSON.stringify(rules, null, 2)}\n`);
 
+/** The page for a handle, or for a search query on a search rule (`youtube-search`). */
 export const profileUrl = (rule: PlatformRule, handle: string): string =>
   rule.url.replace("{handle}", encodeURIComponent(handle.replace(/^@/, "")));
 
@@ -107,10 +108,14 @@ export type SnsConfig = {
   readonly notifyArgv?: readonly string[];
 };
 
+/** Where one scrape's values are kept: `<stateDir>/sns/latest/<this>`; a search query's spaces become underscores. */
+export const latestName = (platform: string, handle: string): string =>
+  `${platform}-${handle.replace(/[^\p{L}\p{N}._-]+/gu, "_")}.json`;
+
 /** Official accounts that always have posts: a broken canary is a broken page, not a quiet account. */
 export const CANARIES = ["youtube:YouTube", "instagram:instagram", "threads:zuck", "tiktok:tiktok"] as const;
 
 export const parseTarget = (t: string): { platform: string; handle: string } | null => {
-  const m = /^([a-z]+):@?([\w.-]+)$/.exec(t.trim());
+  const m = /^([a-z-]+):@?(\S+)$/u.exec(t.trim());
   return m?.[1] && m[2] ? { platform: m[1], handle: m[2] } : null;
 };

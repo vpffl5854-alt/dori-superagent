@@ -22,6 +22,20 @@ test("the model's selector is read out of a reply with prose around it", () => {
   expect(parseHealReply("모르겠다")).toBeNull();
 });
 
+test("a selector that passes again on the healer's own look is a passing glitch, and nothing is changed", async () => {
+  let analyzed = false;
+  const out = await healField("youtube", "link", RULE, {
+    analyze: async () => {
+      analyzed = true;
+      return report;
+    },
+    read: async () => good,
+    ask: async () => '{"selector": "a.model"}',
+  });
+  expect(out).toMatchObject({ picked: null, transient: true });
+  expect(analyzed).toBe(false);
+});
+
 test("a model pick that fails on the page loses to a DOM candidate that passes", async () => {
   const read = async (s: string) =>
     s === "a.new" ? good : s === "div.wrong" ? ["/about"] : [...good, "/x", "/y", "/z"];
@@ -34,7 +48,11 @@ test("a model pick that fails on the page loses to a DOM candidate that passes",
 });
 
 test("a model pick that passes wins, and nothing is tried when no element fits the pattern", async () => {
-  const deps = { analyze: async () => report, read: async () => good, ask: async () => '{"selector": "a.model"}' };
+  const deps = {
+    analyze: async () => report,
+    read: async (s: string) => (s === "a.old" ? [] : good),
+    ask: async () => '{"selector": "a.model"}',
+  };
   expect((await healField("youtube", "link", RULE, deps)).picked).toMatchObject({
     selector: "a.model",
     source: "model",

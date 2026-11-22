@@ -77,7 +77,11 @@ export const healField = async (
   field: string,
   rule: FieldRule,
   deps: HealDeps,
-): Promise<{ readonly picked: Verified | null; readonly report: DomReport }> => {
+): Promise<{ readonly picked: Verified | null; readonly report: DomReport; readonly transient?: true }> => {
+  // A page that answered oddly once (an A/B layout, a slow load) is not a redesign: when the current selector passes
+  // again on the page the healer opened, nothing is changed.
+  if (checkField(rule, await deps.read(rule.selector), deps.pairCount).ok)
+    return { picked: null, report: { matching: 0, candidates: [], sample: "" }, transient: true };
   const report = await deps.analyze();
   if (report.matching === 0) return { picked: null, report };
   const fromModel = parseHealReply((await deps.ask(healPrompt(platform, field, rule, report))) ?? "");

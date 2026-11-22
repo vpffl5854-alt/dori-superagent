@@ -7,6 +7,7 @@ import { fill } from "./config.ts";
 import { run } from "./run.ts";
 import {
   CANARIES,
+  latestName,
   checkField,
   errorLine,
   loadRules,
@@ -55,7 +56,7 @@ const scrape = async (browser: Browser, dir: string, platform: string, handle: s
   await page?.close();
   mkdirSync(join(dir, "latest"), { recursive: true });
   writeFileSync(
-    join(dir, "latest", `${platform}-${handle}.json`),
+    join(dir, "latest", latestName(platform, handle)),
     JSON.stringify({ at: new Date().toISOString(), ...result }, null, 2),
   );
   return healthy;
@@ -100,13 +101,17 @@ const heal = async (browser: Browser, dir: string, cfg: SnsConfig) => {
     const pairCount = pairRule
       ? checkField(pairRule, await readField(page, pairRule.selector, pairRule.attr)).values.length
       : undefined;
-    const { picked, report } = await healField(e.platform, e.field, rule, {
+    const { picked, report, transient } = await healField(e.platform, e.field, rule, {
       analyze: () => analyzeDom(page, rule),
       read: (s) => readField(page, s, rule.attr),
       ask,
       ...(pairCount !== undefined ? { pairCount } : {}),
     });
     await page.close();
+    if (transient) {
+      console.log(`SNS_HEAL_TRANSIENT ${key} the current selector passes again; nothing changed`);
+      continue;
+    }
     if (!picked) {
       console.log(`SNS_HEAL_FAILED ${key} ${report.matching} matching elements, no candidate passed`);
       await notify(cfg, `[SNS] ${key} 셀렉터가 깨졌는데 자동 수리 실패 (맞는 요소 ${report.matching}개). 확인 필요.`);
