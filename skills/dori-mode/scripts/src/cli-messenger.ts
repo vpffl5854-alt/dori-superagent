@@ -27,7 +27,9 @@ import { envInt, fileTgInboundStore, telegramInboundLoop } from "./messenger/tel
 import { formatTelegramInbound } from "./messenger/telegram-line.ts";
 import { ThreadLedger } from "./messenger/thread-ledger.ts";
 import { realTimers } from "./messenger/typing.ts";
+import { adaptDiscord, adaptSlack, adaptTelegram } from "./messenger/unified.ts";
 import { transcribe, TranscriptionError } from "./messenger/voice.ts";
+import { routerOptionsFromEnv, routeTag } from "./router.ts";
 import { realClock, run } from "./run.ts";
 
 /** Messenger errors are one line, never a stack. */
@@ -145,7 +147,8 @@ const telegramInbound = async (stateDir: string, minutes: number): Promise<void>
       ...(topicId !== undefined ? { topicId } : {}),
     },
     minutes,
-    (i) => console.log(formatTelegramInbound(i)),
+    (i) =>
+      console.log(formatTelegramInbound(i) + routeTag(adaptTelegram(i).message, routerOptionsFromEnv(process.env))),
     (m) => console.log(`WARN ${m}`.slice(0, 300)),
   );
 };
@@ -179,7 +182,7 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
     (i) => {
       // The room is the lane's: the INBOUND line goes to the log file only, so the lead pane is not woken for every
       // room message it does not answer.
-      logger.log(formatInbound(i));
+      logger.log(formatInbound(i) + routeTag(adaptDiscord(i).message, routerOptionsFromEnv(process.env)));
       // The lead answers the human, and a bot only when it called Dori; other bot posts are logged and left alone.
       if (i.authorIsBot) {
         void replies.enqueueBot(i);
@@ -215,7 +218,7 @@ const inbound: Command = async ({ key, loopMinutes, config }) => {
   await every(minutes, async () => {
     for (const i of await pollSlackInbound(slack, ledger, { selfUserId: me }))
       console.log(
-        `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify((i.text ?? "").slice(0, 200))}`,
+        `INBOUND ${i.source} ${i.channel} ${i.threadTs ?? "-"} ${i.ts || "-"} ${i.user ?? "-"} ${JSON.stringify((i.text ?? "").slice(0, 200))}${i.source === "unread" ? "" : routeTag(adaptSlack(i).message, routerOptionsFromEnv(process.env))}`,
       );
   });
 };

@@ -3,7 +3,15 @@ import { expect, test } from "bun:test";
 import type { UnifiedMessage } from "../src/messenger/unified.ts";
 import type { Lane } from "../src/registry.ts";
 import type { Progress } from "../src/reports.ts";
-import { classify, type Destination, dispatch, type Handlers, route } from "../src/router.ts";
+import {
+  classify,
+  type Destination,
+  dispatch,
+  type Handlers,
+  route,
+  routerOptionsFromEnv,
+  routeTag,
+} from "../src/router.ts";
 import { statusReport } from "../src/status-report.ts";
 
 const ON = { devinAvailable: true };
@@ -109,4 +117,15 @@ test("the status report lists open lanes with their last report and skips closed
 
 test("the status report says so when nothing is running", () => {
   expect(statusReport([], () => null)).toBe("진행 중인 레인 없음");
+});
+
+test("Devin is on by default and DORI_DEVIN=off turns it off", () => {
+  expect(routerOptionsFromEnv({})).toEqual({ devinAvailable: true });
+  expect(routerOptionsFromEnv({ DORI_DEVIN: " OFF " })).toEqual({ devinAvailable: false });
+});
+
+test("the INBOUND route tag names the kind and the destination", () => {
+  const msg: UnifiedMessage = { platform: "slack", userId: "U", channel: "C", text: "watchdog 버그 원인 추적해줘" };
+  expect(routeTag(msg, { devinAvailable: true })).toBe(" route=coding:devin");
+  expect(routeTag(msg, { devinAvailable: false })).toBe(" route=coding:lane");
 });

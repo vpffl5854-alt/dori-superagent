@@ -166,15 +166,17 @@ Keeps the account shown as online until stopped.
 - Run one instance per account. Two writers flip each other's presence.
 
 ### `dori inbound slack [--loop MIN]`
-Prints `INBOUND <source> <channel> <thread> <ts> <user> <text>`. It reads from three places, each message once:
+Prints `INBOUND <source> <channel> <thread> <ts> <user> <text> route=<kind>:<destination>` (no `route=` on `unread` lines, which carry a count, not a message). It reads from three places, each message once:
 - `threads-view`: unread replies in threads the account follows (Slack's own Threads view);
 - `own-thread`: new replies in any thread the Dori posted in, tagged or not;
 - `unread`: DMs, group DMs and channels with unread mentions.
 
 The Dori's own messages and bot messages are skipped. Every message the Dori posts records its thread in `<stateDir>/slack-threads.json`, whichever helper sends it, so a guest's untagged reply under a root posted with a raw API call is still found.
 
+Every INBOUND line (Slack, Telegram, the Discord inbound log) ends with ` route=<kind>:<destination>`: the central router's pick (`chat:fast-model`, `coding:lane`, `coding:devin`, `video:render`, `status:status`). `DORI_DEVIN=off` sends all coding to `lane`. `dori route --text TEXT` prints the same pick for any text.
+
 ### `dori inbound telegram [--loop MIN]`
-Prints `INBOUND <source> <chat> <thread> <update-id> mid=<message_id> <from> <text>[ file=<kind>:<file_id>]`, keeping Slack's field order — `source` is `dm`, `topic`, `edit:dm` or `edit:topic`. `mid=<message_id>` is always present (never optional, so later fields never shift; `-` when unknown) and names the Telegram message behind the line: a new message and the edits that replace it share the same `mid=`, so a consumer can pair an edit with the original line. A media message appends ` file=<kind>:<file_id>` (voice, audio, video, video_note, animation, document, photo); the line carries the `file_id`, which a caller can pass to Telegram's `getFile`. Live-location shares arrive as a stream of edits carrying only coordinates — those are dropped, not one line each. The corrupt-offset WARN prints to stdout, like every other inbound WARN. Without `--loop` the command is exactly one poll and returns, productive or not. Long-polls `getUpdates`:
+Prints `INBOUND <source> <chat> <thread> <update-id> mid=<message_id> <from> <text>[ file=<kind>:<file_id>] route=<kind>:<destination>`, keeping Slack's field order — `source` is `dm`, `topic`, `edit:dm` or `edit:topic`. `mid=<message_id>` is always present (never optional, so later fields never shift; `-` when unknown) and names the Telegram message behind the line: a new message and the edits that replace it share the same `mid=`, so a consumer can pair an edit with the original line. A media message appends ` file=<kind>:<file_id>` (voice, audio, video, video_note, animation, document, photo); the line carries the `file_id`, which a caller can pass to Telegram's `getFile`. Live-location shares arrive as a stream of edits carrying only coordinates — those are dropped, not one line each. The corrupt-offset WARN prints to stdout, like every other inbound WARN. Without `--loop` the command is exactly one poll and returns, productive or not. Long-polls `getUpdates`:
 - only the configured owner's messages pass (`DORI_TELEGRAM_OWNER_ID`); bot messages never do;
 - DMs from the owner always pass; in a group (`DORI_TELEGRAM_GROUP_ID`) only the configured topic (`DORI_TELEGRAM_TOPIC_ID`) does — with a group but no topic, every owner message in the group passes — with no group configured, DMs only;
 - delivery is at-least-once: the offset in `<stateDir>/telegram-offset` advances past a message only after its `INBOUND` line is out (dropped updates advance immediately), so a crash replays at worst the unprinted lines — duplicates carry the same update id;

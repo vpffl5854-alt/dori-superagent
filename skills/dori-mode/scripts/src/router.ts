@@ -71,3 +71,14 @@ export const dispatch = async (
   const r = route(msg.text, opts);
   return { route: r, reply: await handlers[r.destination](msg) };
 };
+
+/** Devin is on unless DORI_DEVIN=off (the subscription ran out, or the owner switched it off). */
+export const routerOptionsFromEnv = (env: Readonly<Record<string, string | undefined>>): RouterOptions => ({
+  devinAvailable: env["DORI_DEVIN"]?.trim().toLowerCase() !== "off",
+});
+
+/** The suffix every INBOUND line carries, so the lead reads the router's pick next to the message. */
+export const routeTag = (msg: UnifiedMessage, opts: RouterOptions): string => {
+  const r = route(msg.text, opts);
+  return ` route=${r.kind}:${r.destination}`;
+};
