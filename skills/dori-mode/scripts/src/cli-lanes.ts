@@ -1,7 +1,8 @@
 /** dori launch, adopt, claim-done, object-done, close, pause and resume. */
 import { type Command, die } from "./cli-context.ts";
 import { claimDone, closeLane, objectDone } from "./done-flow.ts";
-import { adoptLane, type LaunchInput, launchLane, prepareLaunch } from "./launch.ts";
+import { adoptLane } from "./launch-adopt.ts";
+import { type LaunchInput, launchLane, prepareLaunch } from "./launch.ts";
 import { pauseLane, resumeLane } from "./pause.ts";
 
 const launch: Command = async ({ key, opt, need, ceiling, strings, values, deps }) => {

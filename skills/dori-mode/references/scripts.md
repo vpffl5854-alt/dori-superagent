@@ -71,7 +71,7 @@ The lane never gets the Slack token itself: on hc every env value is a command-l
 `--dry-run` prints the brief as the lane would get it, lessons and footer included, and changes nothing.
 
 ### `dori adopt <key> --pane ID --title T --brief FILE --done "..." [--thread REF]`
-Registers a lane that is already running.
+Registers a lane that is already running. A `--pane` id without a runtime prefix (`hc:`, `herdr:`) or the herdr `w1:p3` shape is recorded on the runtime new lanes open on, the one `dori boot` prints as `RUNTIME`.
 
 ### `dori sync [--write]`
 Prints `key | thread | pane | session | status` for every open lane and every unregistered agent pane, followed by drift. Read-only unless `--write`, which stores session ids.

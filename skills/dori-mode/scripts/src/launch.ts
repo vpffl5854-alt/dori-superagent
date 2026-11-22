@@ -3,8 +3,8 @@ import type { FlowDeps } from "./done-flow.ts";
 import { laneGoalActive } from "./goal-record.ts";
 import { BRIEF_START, footer, originalBrief, quoteForPane } from "./launch-footer.ts";
 import type { Runtimes } from "../../../../src/runtime/registry.ts";
-import { parseRef, type SessionRef } from "../../../../src/runtime/types.ts";
-import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields, upgradeLane } from "./registry.ts";
+import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { LANE_KEY, type Lane, RESERVED_LANE_KEY, sessionFields } from "./registry.ts";
 import { iso, runtimesOf } from "./run.ts";
 import { Reports } from "./reports.ts";
 import { doneSyntaxErrors } from "./signals.ts";
@@ -75,24 +75,6 @@ export const validateLaunch = async (deps: FlowDeps, input: LaunchInput): Promis
   for (const [name, value] of Object.entries(input.budget ?? {})) {
     if (value != null && (!Number.isFinite(value) || value < 0)) throw new LaunchError(`invalid ${name} ceiling`);
   }
-};
-
-export const adoptLane = async (deps: FlowDeps, input: LaunchInput & { readonly pane: string }): Promise<Lane> => {
-  await validateLaunch(deps, input);
-  const base: Lane = {
-    key: input.key,
-    title: input.title,
-    thread: input.thread ?? "none",
-    brief: input.brief,
-    done: input.done,
-    cwd: input.cwd ?? deps.config.defaultCwd,
-    openedAt: iso(deps.clock),
-  };
-  // `hc:t7` or `herdr:w1:p3` names its runtime; any other id is a herdr pane, as before runtimes existed.
-  const ref = parseRef(input.pane);
-  const lane = ref ? { ...base, ...sessionFields(ref) } : upgradeLane({ ...base, pane: input.pane });
-  await deps.registry.write(lane);
-  return lane;
 };
 
 export const prepareLaunch = async (

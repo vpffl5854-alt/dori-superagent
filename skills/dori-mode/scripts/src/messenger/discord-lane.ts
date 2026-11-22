@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import type { SessionRef } from "../../../../../src/runtime/types.ts";
 import { type DoriConfig, fill } from "../config.ts";
-import { type ChosenRuntimes, type Runner, run as realRun, runtimesOf } from "../run.ts";
+import { type ChosenRuntimes, type Clock, type Runner, run as realRun, runtimesOf } from "../run.ts";
 import { readScreen, sendVerified, statusLookup } from "../sessions.ts";
 import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
@@ -52,6 +52,7 @@ const askLane = async (
   rts: ChosenRuntimes,
   sessionPath: () => Promise<string | undefined>,
   inbound: Inbound,
+  clock: Clock,
 ): Promise<string | undefined> => {
   const ref = await resolveLeadRef(config, rts).catch(() => undefined);
   if (!ref) return undefined;
@@ -63,11 +64,11 @@ const askLane = async (
   const size = sessionSize(sessionLog);
   const prompt = `디코 수신 · 채널=${inbound.channel} msg=${inbound.messageId} · 세션기록=${sessionLog}`;
   if ((await sendVerified(rts, clock, ref, prompt)) === "failed") return undefined;
-  const started = Date.now();
+  const started = clock.now();
   // The lane starts a turn for this message; the answer is read once that turn has ended, because a working lane may
   // still be writing it. A lane that never starts working (a refused prompt) is read on the next pass anyway.
-  while (Date.now() - started < MAX_WAIT_MS) {
-    await Bun.sleep(POLL_MS);
+  while (clock.now() - started < MAX_WAIT_MS) {
+    await clock.sleep(POLL_MS);
     const now = (await statusLookup(rts, ref)).status;
     if (now === "working") continue;
     const text = lastAnswer(sessionLog, size);
@@ -88,11 +89,12 @@ export const startLaneAnswers = (
   rts: ChosenRuntimes = runtimesOf({ run: realRun, clock, config }),
   run: Runner = realRun,
   sessionPath: () => Promise<string | undefined> = () => sessionPathForPane(config, rts),
+  pollClock: Clock = clock,
 ): LaneAnswer => {
   const answer = laneAnswerer({
     stateDir: config.stateDir,
     selfId: config.discordSelfId ?? "",
-    answer: async (inbound) => await askLane(config, rts, sessionPath, inbound),
+    answer: async (inbound) => await askLane(config, rts, sessionPath, inbound, pollClock),
     reply: async (inbound, text) => {
       const hook = config.hooks.discordReply;
       if (hook?.length) {

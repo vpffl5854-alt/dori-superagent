@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -109,57 +109,57 @@ const laneConfig = (stateDir: string): DoriConfig => ({
   defaultCwd: "/Users/jib/.dori-superagent/workspace",
 });
 
-test(
-  "the room's lane is handed the message, and its answer goes back through hooks.discordReply",
-  { timeout: 30_000 },
-  () =>
-    withState(async (stateDir) => {
-      laneRecord(stateDir, "discord-chat");
-      const log = sessionLog(join(stateDir, "sessions"));
-      const status = { word: "idle" };
-      const { rts, delivered } = laneRuntime(status);
-      const calls: string[][] = [];
-      const run: Runner = async (argv): Promise<Ran> => {
-        calls.push([...argv]);
-        return { code: 0, out: "", err: "" };
-      };
-      const { http, seen } = fakeHttp();
-      const replies = startLaneAnswers(
-        new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
-        {
-          ...laneConfig(stateDir),
-          hooks: { discordReply: ["dori", "send", "discord", "--to", "{channel}", "--text", "{text}"] },
-        },
-        rts,
-        run,
-        async () => log,
-      );
-      try {
-        const pending = replies.enqueue(person());
-        const deadline = Date.now() + 5_000;
-        while (delivered.length === 0 && Date.now() < deadline) await Bun.sleep(10);
-        appendFileSync(log, assistant(ANSWER));
-        status.word = "idle";
-        // The lane reads its answer only after its turn has ended, so the test waits for the turn it started to finish.
-        expect(await pending).toBe(true);
-      } finally {
-        replies.stop();
-      }
-      expect(delivered[0]).toContain("msg=10");
-      // The prompt is the message's name and nothing else: a line that reads like a standing order is repeated by a
-      // lane that answers in prose, and the watchdog then sees one command run over and over.
-      expect(delivered[0]).toBe(`디코 수신 · 채널=${CHANNEL} msg=10 · 세션기록=${log}`);
-      expect(calls).toEqual([["dori", "send", "discord", "--to", CHANNEL, "--text", ANSWER]]);
-      expect(posts(seen)).toHaveLength(0);
-    }),
-);
+/** A clock whose poll interval is the lane's own; the test's fast clock shortens only the wait between polls. */
+const fastClock = { now: () => Date.now(), sleep: (ms: number) => Bun.sleep(Math.min(ms, 2)) };
 
-test("without hooks.discordReply the bridge posts the lane's answer to the room itself", { timeout: 30_000 }, () =>
+test("the room's lane is handed the message, and its answer goes back through hooks.discordReply", () =>
   withState(async (stateDir) => {
     laneRecord(stateDir, "discord-chat");
     const log = sessionLog(join(stateDir, "sessions"));
     const status = { word: "idle" };
-    const { rts } = laneRuntime(status);
+    const { rts, delivered } = laneRuntime(status);
+    const calls: string[][] = [];
+    const run: Runner = async (argv): Promise<Ran> => {
+      calls.push([...argv]);
+      return { code: 0, out: "", err: "" };
+    };
+    const { http, seen } = fakeHttp();
+    const replies = startLaneAnswers(
+      new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
+      {
+        ...laneConfig(stateDir),
+        hooks: { discordReply: ["dori", "send", "discord", "--to", "{channel}", "--text", "{text}"] },
+      },
+      rts,
+      run,
+      async () => log,
+      fastClock,
+    );
+    try {
+      const pending = replies.enqueue(person());
+      const deadline = Date.now() + 5_000;
+      while (delivered.length === 0 && Date.now() < deadline) await Bun.sleep(10);
+      appendFileSync(log, assistant(ANSWER));
+      status.word = "idle";
+      // The lane reads its answer only after its turn has ended, so the test waits for the turn it started to finish.
+      expect(await pending).toBe(true);
+    } finally {
+      replies.stop();
+    }
+    expect(delivered[0]).toContain("msg=10");
+    // The prompt is the message's name and nothing else: a line that reads like a standing order is repeated by a
+    // lane that answers in prose, and the watchdog then sees one command run over and over.
+    expect(delivered[0]).toBe(`디코 수신 · 채널=${CHANNEL} msg=10 · 세션기록=${log}`);
+    expect(calls).toEqual([["dori", "send", "discord", "--to", CHANNEL, "--text", ANSWER]]);
+    expect(posts(seen)).toHaveLength(0);
+  }));
+
+test("without hooks.discordReply the bridge posts the lane's answer to the room itself", () =>
+  withState(async (stateDir) => {
+    laneRecord(stateDir, "discord-chat");
+    const log = sessionLog(join(stateDir, "sessions"));
+    const status = { word: "idle" };
+    const { rts, delivered } = laneRuntime(status);
     const { http, seen } = fakeHttp();
     const replies = startLaneAnswers(
       new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
@@ -167,11 +167,13 @@ test("without hooks.discordReply the bridge posts the lane's answer to the room 
       rts,
       async () => ({ code: 0, out: "", err: "" }),
       async () => log,
+      fastClock,
     );
     try {
       const pending = replies.enqueue(person());
+      // The answer is written after the lane has taken the prompt, so the test waits for that delivery, not for time.
       const deadline = Date.now() + 5_000;
-      while (!readFileSync(log, "utf8").includes("디코 수신") && Date.now() < deadline) await Bun.sleep(10);
+      while (delivered.length === 0 && Date.now() < deadline) await Bun.sleep(10);
       appendFileSync(log, assistant(ANSWER));
       // The lane reads its answer only after the turn it started has ended.
       status.word = "idle";
@@ -185,5 +187,4 @@ test("without hooks.discordReply the bridge posts the lane's answer to the room 
       allowed_mentions: { parse: [] },
       message_reference: { message_id: "10", fail_if_not_exists: false },
     });
-  }),
-);
+  }));

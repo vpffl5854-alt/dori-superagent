@@ -132,5 +132,4 @@ test.skipIf(!hasBrowser)(
       await browser.close();
     }
   },
-  30_000,
 );
