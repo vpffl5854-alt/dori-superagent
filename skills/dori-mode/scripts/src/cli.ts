@@ -6,6 +6,7 @@ import { journalCommands, journalErrors } from "./cli-journal.ts";
 import { laneCommands } from "./cli-lanes.ts";
 import { messengerCommands, messengerErrors } from "./cli-messenger.ts";
 import { opsCommands } from "./cli-ops.ts";
+import { routeCommands } from "./cli-route.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { LaunchError } from "./launch.ts";
@@ -51,6 +52,7 @@ const USAGE = `dori <command> [options]
                                        post or edit a message (tokens from DORI_SLACK_TOKEN or the file DORI_SLACK_TOKEN_FILE names, DORI_TELEGRAM_TOKEN, DORI_DISCORD_TOKEN)
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file>              run hooks.transcribe and print the text
+  route  --text TEXT [--no-devin]      print the central router's pick (chat, coding to lane or Devin, video, status)
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions`;
 
@@ -95,6 +97,7 @@ const flags = parseArgs({
     global: { type: "boolean" },
     source: { type: "string" },
     open: { type: "boolean" },
+    "no-devin": { type: "boolean" },
   },
 });
 
@@ -103,6 +106,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...laneCommands,
   ...opsCommands,
   ...messengerCommands,
+  ...routeCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 
