@@ -32,6 +32,10 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 - 이슈 사냥꾼: launchd `com.dori.hunt-daily`가 매일 10시 맥에서 재현 가능한 버그를 골라 백로그(우선순위 7)에 넣고 `[이슈 사냥꾼]` 메시지를 보낸다. 시간당 루프는 지브 지시로 멈춰 있으니, 레인을 열지는 리드가 판단한다. 연다면 PR은 fork에서만, 리뷰·머지 게이트를 거친다.
 - 월간 비용 보고: launchd `com.dori.cost-monthly`가 매달 1일 09:30 지난달 보고서를 지브 텔레그램으로 보낸다. 리드가 할 일은 없다.
 
+## 고장 자동 신고 (지브 승인, 2026-11-23)
+- launchd `com.dori.incidents`가 매시간 `dori-skill incidents --report`로 `~/.dori-superagent/logs`의 새 줄을 읽고, 같은 고장이 3번 이상이면 형 저장소에 `auto-incident` 이슈를 만들고 백로그(`incident-xxxxxxxx`, 우선순위 3)에 넣고 지브 텔레그램과 이 판에 `🚨 [고장 신고]`를 보낸다.
+- 지브 승인은 `지브 승인: incident-xxxxxxxx 고쳐라`로 이 판에 온다(텔레그램 omo 판이 넘겨준다). 그때만 브리프 `~/.dori-superagent/state/incidents/<키>.md`로 레인을 연다. 저장소 코드가 원인이면 worktree에서 고치고 PR(형 저장소 mine)을 올린 뒤 리뷰·머지 게이트, 맥 설정·스크립트가 원인이면 백업 후 고치고 이슈에 댓글. 끝나면 지브에게 결과 한 줄.
+
 ## SNS 스크래퍼 자가치유 (지브 승인, 2026-11-22)
 - launchd `com.dori.sns-heal`가 3시간마다 `dori-skill sns run --heal`로 유튜브·인스타·스레드·틱톡 공개 프로필과 관심 분야 유튜브 검색을 긁고, 셀렉터가 깨지면 바뀐 DOM을 보고 셀렉터를 고쳐 `sns/selectors.json`만 커밋·push한다(자동 배포). 결과는 지브 텔레그램으로 간다.
 - `SNS_HEAL_FAILED`가 같은 필드에서 이틀 이어지면 레인을 열어 원인을 본다. 로그인이 필요한 화면이 된 것이면 우회하지 말고 지브에게 알린다.

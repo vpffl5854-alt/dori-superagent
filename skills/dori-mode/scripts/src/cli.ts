@@ -7,6 +7,7 @@ import { laneCommands } from "./cli-lanes.ts";
 import { messengerCommands, messengerErrors } from "./cli-messenger.ts";
 import { opsCommands } from "./cli-ops.ts";
 import { huntCommands } from "./cli-hunt.ts";
+import { incidentsCommands } from "./cli-incidents.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
 import { snsCommands } from "./cli-sns.ts";
@@ -69,6 +70,7 @@ const USAGE = `dori <command> [options]
                                        "everything in the world" slots: random Korean Wikipedia topics, script, lead image
   sns scrape <platform> <handle> | run [--heal] | heal
                                        public YouTube/Instagram/Threads/TikTok profiles; heal rewrites a broken selector
+  incidents [--report]                 repeating faults in Dori's own logs; --report files issue + backlog + tells owner
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
@@ -124,6 +126,7 @@ const flags = parseArgs({
     "no-send": { type: "boolean" },
     auto: { type: "boolean" },
     heal: { type: "boolean" },
+    report: { type: "boolean" },
   },
 });
 
@@ -136,6 +139,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...huntCommands,
   ...shortsCommands,
   ...snsCommands,
+  ...incidentsCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 
