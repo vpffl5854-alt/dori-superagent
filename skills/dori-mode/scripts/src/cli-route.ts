@@ -1,5 +1,8 @@
-/** dori route and dori er: the central router's pick for a message, and the infirmary sweep over working lanes. */
+/** dori route, er and cost: the central router's pick, the infirmary sweep over working lanes, the monthly cost report. */
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type Command, die, every } from "./cli-context.ts";
+import { aggregate, type Call, parseSession, renderReport } from "./cost-report.ts";
 import { erTick, TAIL_LINES } from "./er.ts";
 import { sessionOf } from "./registry.ts";
 import { Reports } from "./reports.ts";
@@ -31,4 +34,27 @@ const er: Command = async ({ loopMinutes, config, deps }) => {
   });
 };
 
-export const routeCommands: Readonly<Record<string, Command>> = { route: routeCommand, er };
+/** Every session log under sessionsDir (one folder per working directory); an unreadable one is skipped. */
+const sessionCalls = (dir: string): Call[] => {
+  const out: Call[] = [];
+  for (const entry of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+    if (!entry.endsWith(".jsonl") || entry.includes("-artifacts")) continue;
+    try {
+      out.push(...parseSession(entry, readFileSync(join(dir, entry), "utf8")));
+    } catch {}
+  }
+  return out;
+};
+
+const cost: Command = async ({ opt, values, config }) => {
+  const month = opt("month") ?? new Date().toISOString().slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) die("--month must be YYYY-MM");
+  const report = renderReport(month, aggregate(sessionCalls(config.sessionsDir).filter((c) => c.month === month)));
+  if (values["write"] !== true) return void console.log(report);
+  const dir = join(config.stateDir, "reports");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `cost-${month}.md`), report);
+  console.log(`COST_REPORT ${join(dir, `cost-${month}.md`)}`);
+};
+
+export const routeCommands: Readonly<Record<string, Command>> = { route: routeCommand, er, cost };
