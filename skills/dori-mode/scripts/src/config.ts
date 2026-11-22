@@ -15,6 +15,8 @@ export type Hooks = {
   readonly transcribe?: ArgvTemplate;
   /** How the Discord room's lane posts its answer: `{channel}`, `{message}` and `{text}`. */
   readonly discordReply?: ArgvTemplate;
+  /** Where `dori er` sends its prescriptions (`{text}`, one ER line per line), for example the lead's inbox. */
+  readonly erNotify?: ArgvTemplate;
   /** How `dori render-er --rerun` runs one render job again: `{job}` is the job id (its log file name). */
   readonly render?: ArgvTemplate;
 };

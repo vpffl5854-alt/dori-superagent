@@ -27,6 +27,11 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 - **설정 변경 요청**("목소리 바꿔", "배경 단색으로", "저녁 9시에 보내", "관심 분야에 운동 추가")은 `dori-skill shorts config <키> <값>`으로만 바꾼다. 설정 JSON을 직접 고치지 않는다. 지금 값은 `dori-skill shorts config`. 키: `voice`(Yuna, Eddy, Flo, Reed, Rocko, Sandy, Shelley, Grandma, Grandpa, none) · `background`(wiki | plain) · `topics`(trend | wiki) · `interests`(쉼표 목록, 전체를 다시 적는다) · `maxSeconds`(15~180) · `font`(폰트 파일 경로) · `time`(HH:MM). 바꾼 뒤 지브가 원하면 `dori-skill shorts make --auto`로 테스트 영상을 하나 보낸다. `SHORTS_CONFIG_REFUSED`면 그 이유를 지브에게 그대로 전한다.
 - `SHORTS_FAILED`나 `SHORTS_CHECK_FAILED`가 나오면 `dori-skill render-er ~/.dori-superagent/state/shorts/logs`로 원인을 읽고, `rerun`이 아닌 원인은 지브에게 알린다. 같은 작업을 그냥 다시 돌리지 않는다.
 
+## 자동으로 도는 것 (지브 승인, 2026-11-22)
+- 의무실: launchd `com.dori.er`가 5분마다 리드·duty·일하는 레인 화면을 읽고, 모델이 막히면 `[의무실]` 메시지로 이 판에 보낸다. `switch-model` 처방이면 그 레인만 예비 모델로 바꾸고, `escalate`면 지브에게 알리고, `wait`면 기다린다.
+- 이슈 사냥꾼: launchd `com.dori.hunt-daily`가 매일 10시 맥에서 재현 가능한 버그를 골라 백로그(우선순위 7)에 넣고 `[이슈 사냥꾼]` 메시지를 보낸다. 시간당 루프는 지브 지시로 멈춰 있으니, 레인을 열지는 리드가 판단한다. 연다면 PR은 fork에서만, 리뷰·머지 게이트를 거친다.
+- 월간 비용 보고: launchd `com.dori.cost-monthly`가 매달 1일 09:30 지난달 보고서를 지브 텔레그램으로 보낸다. 리드가 할 일은 없다.
+
 ## SNS 스크래퍼 자가치유 (지브 승인, 2026-11-22)
 - launchd `com.dori.sns-heal`가 3시간마다 `dori-skill sns run --heal`로 유튜브·인스타·스레드·틱톡 공개 프로필과 관심 분야 유튜브 검색을 긁고, 셀렉터가 깨지면 바뀐 DOM을 보고 셀렉터를 고쳐 `sns/selectors.json`만 커밋·push한다(자동 배포). 결과는 지브 텔레그램으로 간다.
 - `SNS_HEAL_FAILED`가 같은 필드에서 이틀 이어지면 레인을 열어 원인을 본다. 로그인이 필요한 화면이 된 것이면 우회하지 말고 지브에게 알린다.

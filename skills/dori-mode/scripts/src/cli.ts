@@ -56,7 +56,7 @@ const USAGE = `dori <command> [options]
   presence <slack|discord>             keep the account shown as online until stopped
   transcribe <audio-file>              run hooks.transcribe and print the text
   route  --text TEXT [--no-devin]      print the central router's pick (chat, coding to lane or Devin, video, status)
-  cost   [--month YYYY-MM] [--write]   per-model calls, input length, cost, failures, retries, success rate from omo session logs
+  cost   [--month YYYY-MM|prev] [--write]   per-model calls, input length, cost, failures, retries, success rate from omo session logs
   hunt   [owner/repo ...] [--write]    unclaimed good-first-issues and bugs (config huntRepos by default); --write saves lane briefs
   shorts topics [--no-send]            run the topics slot, save 3 candidates, send them to Telegram to pick
   shorts make (--auto|--topic T|--pick N) [--script FILE] [--no-send]

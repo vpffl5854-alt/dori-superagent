@@ -1,9 +1,9 @@
 /** dori route, er, cost and render-er: the router's pick, the infirmary, the monthly cost report, the render hospital. */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Command, die, every } from "./cli-context.ts";
 import { aggregate, type Call, parseSession, renderReport } from "./cost-report.ts";
-import { erTick, TAIL_LINES } from "./er.ts";
+import { erTick, harnessLanes, TAIL_LINES } from "./er.ts";
 import { fill } from "./config.ts";
 import { planRenders, renderLine } from "./render-er.ts";
 import { sessionOf } from "./registry.ts";
@@ -22,6 +22,19 @@ const routeCommand: Command = async ({ opt, values, config, deps }) => {
   console.log(statusReport(await deps.registry.list(), (key) => reports.read(key)));
 };
 
+const readJson = <T>(path: string): T | null => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T;
+  } catch {
+    return null;
+  }
+};
+
+const readHarness = (dir: string) =>
+  (existsSync(dir) ? readdirSync(dir) : []).flatMap((f) =>
+    f.endsWith(".json") ? [readJson<Record<string, never>>(join(dir, f)) ?? {}] : [],
+  );
+
 const er: Command = async ({ loopMinutes, config, deps }) => {
   const seen = new Set<string>();
   const rts = runtimesFor(config, process.env, run);
@@ -31,8 +44,18 @@ const er: Command = async ({ loopMinutes, config, deps }) => {
       const ref = sessionOf(lane);
       return ref ? await readScreen(rts, ref, TAIL_LINES).catch(() => null) : null;
     };
-    const lines = await erTick(await deps.registry.list(), read, config, seen, new Date().toISOString().slice(0, 13));
+    // With DORI_HOME set the harness's own lane and role records are watched; otherwise this skill's registry.
+    const home = process.env["DORI_HOME"];
+    const lanes = home
+      ? harnessLanes(readHarness(join(home, "lanes")), readJson(join(home, "roles.json")) ?? {})
+      : await deps.registry.list();
+    const lines = await erTick(lanes, read, config, seen, new Date().toISOString().slice(0, 13));
     for (const line of lines) console.log(line);
+    const hook = config.hooks.erNotify;
+    if (lines.length > 0 && hook?.length) {
+      const r = await run(fill(hook, { text: `[의무실]\n${lines.join("\n")}` }), { timeoutMs: 60_000 });
+      if (r.code !== 0) console.log(`ER_NOTIFY_FAILED exit=${r.code} ${r.err.slice(0, 160)}`);
+    }
   });
 };
 
@@ -49,7 +72,12 @@ const sessionCalls = (dir: string): Call[] => {
 };
 
 const cost: Command = async ({ opt, values, config }) => {
-  const month = opt("month") ?? new Date().toISOString().slice(0, 7);
+  // `prev` is last month: the monthly job runs on the 1st for the month that just ended.
+  const now = new Date();
+  const month =
+    opt("month") === "prev"
+      ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+      : (opt("month") ?? now.toISOString().slice(0, 7));
   if (!/^\d{4}-\d{2}$/.test(month)) die("--month must be YYYY-MM");
   const report = renderReport(month, aggregate(sessionCalls(config.sessionsDir).filter((c) => c.month === month)));
   if (values["write"] !== true) return void console.log(report);

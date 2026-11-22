@@ -81,3 +81,25 @@ test("a lane without its own model is judged against the default model", async (
   );
   expect(out).toEqual(["ER x model-dead model=m0 -> escalate"]);
 });
+
+test("the harness's working and waiting lanes and its lead and duty agents are watched; finished lanes are not", async () => {
+  const { harnessLanes } = await import("../src/er.ts");
+  const lanes = harnessLanes(
+    [
+      { key: "chat", status: "working", sessionRef: { runtime: "hc", id: "t5r" } },
+      { key: "wait", status: "waiting", sessionRef: { runtime: "hc", id: "t6" } },
+      { key: "old", status: "done", sessionRef: { runtime: "hc", id: "t1" } },
+      { key: "broken", status: "working" },
+    ],
+    { lead: "hc:t1t", duty: "hc:t1v", "hourly-loop": "hc:t1x" },
+  );
+  expect(lanes.map((l) => `${l.key}@${l.sessionRef?.id}`)).toEqual(["lead@t1t", "duty@t1v", "chat@t5r", "wait@t6"]);
+  const out = await erTick(
+    lanes,
+    async (l) => (l.key === "lead" ? "429 Too Many Requests" : "ok"),
+    { defaultModel: "m0", backupModels: ["m1"] },
+    new Set(),
+    "h",
+  );
+  expect(out).toEqual(["ER lead rate-limit model=m0 -> switch-model to=m1"]);
+});

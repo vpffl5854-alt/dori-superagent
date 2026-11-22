@@ -25,11 +25,16 @@ const HELP = /help[\s-]?wanted/i;
 const BLOCKED =
   /wontfix|won't fix|duplicate|invalid|question|needs[\s-]?(?:triage|info|design|decision)|blocked|discussion/i;
 
+/** Lanes run on a Mac: an issue that only happens on another OS cannot be reproduced, so it is never a pick. */
+const OTHER_OS =
+  /^\s*\[?(?:windows|win32|linux|android|ios)\b|\bon windows\b|\bwindows only\b|^platform:\s*(?:windows|linux)|^os:\s*(?:windows|linux)|^windows$|^linux$|\b(?:linux|windows)[ -](?:x64|x86_64|arm64|aarch64)\b/i;
+
 /** Pickable: nobody assigned, no PR already closing it, a good-first-issue or bug label, nothing blocking. */
 export const scoreIssue = (issue: GhIssue, now: number): { score: number; why: string } | null => {
   const names = issue.labels.map((l) => l.name);
   if (issue.assignees.length > 0 || (issue.closedByPullRequestsReferences?.length ?? 0) > 0) return null;
   if (names.some((n) => BLOCKED.test(n))) return null;
+  if (OTHER_OS.test(issue.title) || names.some((n) => OTHER_OS.test(n))) return null;
   const good = names.some((n) => GOOD_FIRST.test(n));
   const bug = names.some((n) => BUG.test(n));
   if (!good && !bug) return null;

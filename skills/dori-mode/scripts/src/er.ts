@@ -79,3 +79,34 @@ export const erTick = async (
   }
   return out;
 };
+
+/**
+ * The harness keeps its own records (`$DORI_HOME/lanes/<key>.json` with a status of working, waiting, ready, done or
+ * lost, and `$DORI_HOME/roles.json` naming the lead and duty sessions as `hc:t1t`). The infirmary reads them as lanes
+ * so a harness home is watched too: every working or waiting lane, plus the lead and duty agents themselves.
+ */
+export const harnessLanes = (
+  laneRecords: readonly { key?: string; status?: string; sessionRef?: { runtime?: string; id?: string } }[],
+  roles: Readonly<Record<string, string>>,
+): Lane[] => {
+  const asLane = (key: string, runtime: string, id: string): Lane => ({
+    key,
+    title: key,
+    thread: "-",
+    brief: "-",
+    done: "-",
+    openedAt: "",
+    pane: id,
+    sessionRef: { runtime: runtime as "hc" | "herdr", id },
+  });
+  const lanes = laneRecords.flatMap((r) =>
+    r.key && r.sessionRef?.runtime && r.sessionRef.id && (r.status === "working" || r.status === "waiting")
+      ? [asLane(r.key, r.sessionRef.runtime, r.sessionRef.id)]
+      : [],
+  );
+  const agents = ["lead", "duty"].flatMap((role) => {
+    const [runtime, id] = (roles[role] ?? "").split(":");
+    return runtime && id ? [asLane(role, runtime, id)] : [];
+  });
+  return [...agents, ...lanes];
+};

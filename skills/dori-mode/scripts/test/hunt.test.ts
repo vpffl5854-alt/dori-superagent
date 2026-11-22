@@ -51,3 +51,10 @@ test("the lane key is a valid lane key and the brief carries the issue and the n
   expect(brief).toContain("Never push to the upstream repository");
   expect(brief).toContain("does not reproduce");
 });
+
+test("an issue that only happens on another OS is never picked: lanes run on a Mac", () => {
+  expect(scoreIssue(issue(1, ["bug"], { title: "Windows: stdin is slow" }), NOW)).toBeNull();
+  expect(scoreIssue(issue(2, ["bug", "platform: linux"]), NOW)).toBeNull();
+  expect(scoreIssue(issue(4, ["bug"], { title: "async callbacks never fire (Bun 1.4.3, linux x64)" }), NOW)).toBeNull();
+  expect(scoreIssue(issue(3, ["bug"], { title: "bundler drops --target node" }), NOW)?.score).toBe(2);
+});
