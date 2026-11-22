@@ -9,8 +9,6 @@
  * The human's messages are answered by the lead pane. A bot post that called Dori is answered in the room by
  * `discord-bot-replies.ts`, with the lead's answer when it has one; other bot chatter is logged and left alone.
  */
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 
 import type { SessionRef } from "../../../../../src/runtime/types.ts";
 import type { DoriConfig } from "../config.ts";
@@ -21,55 +19,15 @@ import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
 import { lastAnswer, postAnswer, sessionSize } from "./discord-reply.ts";
 import { resolveLeadRef, sessionPathFor } from "./discord-pane.ts";
+import { note, type Pending, pendingPath, readPending, writePending } from "./discord-answers-state.ts";
 
 const POLL_MS = 1_500;
 const MAX_WAIT_MS = 20 * 60 * 1000;
 
-type Pending = {
-  channel: string;
-  messageId: string;
-  sessionPath: string;
-  offset: number;
-  /** The message body, carried so the lane answers from it instead of opening the session log first. */
-  text?: string;
-  /** Who wrote the message, shown to the pane so it knows whose words it is answering. */
-  author?: string;
-  /** How the message reached the room: a reply names the post it answers, a mention names who called. The lane
-   * answers a reply or a mention directly, and plain room text only when it has something to add. */
-  mentions?: readonly string[];
-  replyToAuthor?: string;
-  /** Where this message's own turn started, when the pane was idle at the hand-off: an answer before it is not this one's. */
-  ownFrom?: number;
-};
-
 export type ReplyLoop = { readonly stop: () => void };
-
-const pendingPath = (stateDir: string): string => join(stateDir, "discord-reply-pending.json");
-const logPath = (stateDir: string): string => join(stateDir, "discord-replies.log");
 
 const sleep = (ms: number): Promise<void> => Bun.sleep(ms);
 const clock = { now: () => Date.now(), sleep };
-
-const readPending = (path: string): Pending[] => {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    return Array.isArray(parsed) ? (parsed as Pending[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-const writePending = (path: string, pending: readonly Pending[]): void => {
-  try {
-    writeFileSync(path, JSON.stringify(pending, null, 1));
-  } catch {}
-};
-
-const note = (stateDir: string, line: string): void => {
-  try {
-    appendFileSync(logPath(stateDir), `[${new Date().toISOString()}] ${line}\n`);
-  } catch {}
-};
 
 /** True when the pane's input box already holds unsent text: typing then would append to it, not send. */
 const draftPresent = async (rts: ReturnType<typeof runtimesOf>, ref: SessionRef): Promise<boolean> => {
@@ -152,7 +110,10 @@ export const startDiscordReplies = (
         item.author,
         item.text,
         item.mentions?.length || item.replyToAuthor
-          ? { ...(item.mentions ? { mentions: item.mentions } : {}), ...(item.replyToAuthor ? { replyToAuthor: item.replyToAuthor } : {}) }
+          ? {
+              ...(item.mentions ? { mentions: item.mentions } : {}),
+              ...(item.replyToAuthor ? { replyToAuthor: item.replyToAuthor } : {}),
+            }
           : undefined,
       ))
     )

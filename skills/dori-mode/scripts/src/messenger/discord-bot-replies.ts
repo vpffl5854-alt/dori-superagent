@@ -40,7 +40,9 @@ export const INTERNAL_NOTE =
 /** True when `text` is something a person would read: not blank, not the quote-only "말에 답한다" line, and not one of
  * the lane's own bookkeeping notes. */
 export const hasContent = (text: string): boolean =>
-  text.trim() !== "" && !EMPTY_BOT_REPLY.test(text) && !text.split("\n").every((l) => l.trim() === "" || INTERNAL_NOTE.test(l));
+  text.trim() !== "" &&
+  !EMPTY_BOT_REPLY.test(text) &&
+  !text.split("\n").every((l) => l.trim() === "" || INTERNAL_NOTE.test(l));
 
 /**
  * Why this bot post deserves an answer, or null when it is bot-to-bot chatter that only gets logged.
