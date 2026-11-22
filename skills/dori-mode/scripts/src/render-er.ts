@@ -73,7 +73,11 @@ export type RenderFinding = {
   readonly rerun: boolean;
 };
 
+/** The shorts factory ends every render log with the exit code; a clean exit is a finished job whatever it printed. */
+const CLEAN_EXIT = /exit code 0\s*$/;
+
 export const diagnoseRender = (job: string, log: string): RenderFinding | null => {
+  if (CLEAN_EXIT.test(log)) return null;
   for (const s of SIGNS) if (s.sign.test(log)) return { job, kind: s.kind, fix: s.fix, rerun: s.rerun };
   return FAILED.test(log)
     ? { job, kind: "unknown", fix: "read the log's last traceback; no known cause matched", rerun: false }

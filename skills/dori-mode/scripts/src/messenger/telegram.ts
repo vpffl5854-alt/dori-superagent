@@ -66,6 +66,30 @@ export class Telegram {
     });
   }
 
+  /** Uploads a video (multipart, so no JSON body); Telegram bots may send files up to 50 MB. */
+  async sendVideo(t: TgTarget, bytes: Uint8Array<ArrayBuffer>, filename: string, caption = ""): Promise<number> {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(this.where(t))) form.append(k, String(v));
+    if (caption) form.append("caption", guardText(caption).slice(0, 1024));
+    form.append("supports_streaming", "true");
+    form.append("video", new Blob([bytes], { type: "video/mp4" }), filename);
+    const res = await withBackoff(
+      this.http,
+      this.clock,
+      { method: "POST", url: `${this.base}/bot${this.botToken}/sendVideo`, body: form },
+      undefined,
+      retryAfter,
+    );
+    const body = JSON.parse(res.body || "{}") as {
+      ok?: boolean;
+      result?: { message_id: number };
+      description?: string;
+    };
+    if (!body.ok || !body.result)
+      throw new MessengerError(`telegram sendVideo: ${body.description ?? res.status}`, res.status);
+    return body.result.message_id;
+  }
+
   async typing(t: TgTarget): Promise<void> {
     await this.call("sendChatAction", { ...this.where(t), action: "typing" });
   }

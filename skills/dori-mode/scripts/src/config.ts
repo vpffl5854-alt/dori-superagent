@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { RuntimeKind } from "../../../../src/runtime/types.ts";
+import type { ShortsConfig } from "./shorts.ts";
 import type { SupervisionOptions } from "./supervision-observe.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
 
@@ -53,6 +54,8 @@ export type DoriConfig = {
   readonly backupModels: readonly string[];
   /** `owner/repo` list `dori hunt` reads when no repository is named on the command line. */
   readonly huntRepos: readonly string[];
+  /** The shorts factory's slots and send target (`dori shorts`); absent means no slot is filled. */
+  readonly shorts?: ShortsConfig;
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */

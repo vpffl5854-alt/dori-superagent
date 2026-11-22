@@ -150,6 +150,20 @@ Each alert prints once per change. `close` takes one more usage reading, prints 
 ### `dori hunt [owner/repo ...] [--write]`
 The issue hunter. Reads the open issues of each named repository (config `huntRepos` when none is named) through `gh issue list` and prints up to three picks per repository: `HUNT <repo>#<n> score=<s> <labels> "<title>"`. An issue is a pick only when nobody is assigned, no pull request already closes it, it carries a good-first-issue or bug label, and no label blocks it (wontfix, duplicate, question, needs-triage and the like). Good-first-issue scores 3, bug 2, help-wanted 1; a long thread or six months of silence lowers it. `HUNT_NONE` and `HUNT_FAILED` name a repository with no pick or a failed read. `--write` saves one lane brief per pick to `<stateDir>/hunt/<key>.md` (reproduce, failing test, fix, PR from a fork, never push upstream) and prints `HUNT_BRIEF <key> <path>`. It only reads issues; the lead launches the lane, and the PR goes through the usual review and merge gate.
 
+### `dori shorts topics | make | render`
+The shorts factory. One job folder per video under `<stateDir>/shorts/jobs/<job>/` (topic, `script.json`, `voice/<i>.*`, `images/<i>.*`, `out.mp4`). Four slots in config `shorts` take any command the owner chooses:
+- `topics`: prints candidate topics, one per line;
+- `script`: writes `{"title": ..., "lines": [...]}` to `{out}` for `{topic}`;
+- `voice`: writes the spoken `{text}` to `{out}` (`voiceExt`, default `aiff`), one call per line;
+- `image`: writes a picture for the scene `{text}` to `{out}` (`imageExt`, default `png`), one call per line.
+
+Built in: the MoviePy render (`scripts/shorts/render.py`, 1080x1920, one scene per line, captions in `shorts.font`, default Apple SD Gothic Neo, each scene exactly as long as its voice), the ffprobe check (1080x1920, at least 3 s, at most `maxSeconds` default 60, an audio track when voiced) and the Telegram send (`sendVideo` to `shorts.sendChat` / `sendThread`, with `DORI_TELEGRAM_TOKEN`). `shorts.python` names a Python with moviepy 2.2.1. With no voice slot the video is captions only; with no image slot each scene has a plain background; without a script slot `make` needs `--script FILE`.
+- `topics [--no-send]` runs the topics slot, saves three candidates and sends them to Telegram as a numbered list;
+- `make (--topic T | --pick N) [--script FILE] [--no-send]` prints `SHORTS_JOB <job>`, then `SHORTS_OK <path>` and `SHORTS_SENT <message-id>`; a failed slot or render prints `SHORTS_FAILED`, a failed check `SHORTS_CHECK_FAILED` (exit 3) and nothing is sent;
+- `render <job>` renders and checks an existing job again; set `hooks.render` to `["dori", "shorts", "render", "{job}"]` so `dori render-er <stateDir>/shorts/logs --rerun` reruns curable failures.
+
+Every render writes `<stateDir>/shorts/logs/<job>.log`, ending with its exit code, the folder `dori render-er` reads.
+
 ### `dori render-er <log-dir> [--rerun]`
 The render hospital. Every `<job>.log` in the folder is one render job's MoviePy/ffmpeg log. For each failed job it prints `RENDER <job> <cause> -> rerun|hold "<fix>"`, then `RERUN <jobs>` (`-` when none). Causes, checked in order: `ffmpeg-missing`, `codec` (missing encoder, codec the container refuses), `font` (unopenable font file, ImageMagick missing), `audio-duration` (a clip read past its end), `missing-input`, `out-of-memory`, `timeout`; a traceback or error that matches none of them is `unknown`. Only `out-of-memory` and `timeout` are rerun: every other cause is in the setup or the script, so the same job run again unchanged fails the same way, and it is held with its fix. A clean log is not reported. `--rerun` runs `hooks.render` (`{job}` is the job id) for each rerun job and prints `RERUN_OK` or `RERUN_FAILED`; without that hook it stops with an error rather than guess a command.
 
