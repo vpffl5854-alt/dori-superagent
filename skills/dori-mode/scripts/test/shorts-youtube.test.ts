@@ -75,3 +75,28 @@ test("the upload is one multipart request with the metadata first and the video 
   const text = new TextDecoder().decode(sent?.body as Uint8Array);
   expect(text.indexOf('"containsSyntheticMedia":true')).toBeLessThan(text.indexOf("video/mp4"));
 });
+
+test("making a short public sends the declarations again, so AI-made is never dropped", async () => {
+  const { setVisibility } = await import("../src/shorts-youtube.ts");
+  const now = 1_000_000_000_000;
+  let sent: HttpRequest | undefined;
+  const http = async (req: HttpRequest) => {
+    sent = req;
+    return { status: 200, headers: {}, body: '{"status":{"privacyStatus":"public","containsSyntheticMedia":true}}' };
+  };
+  expect(await setVisibility(http, files(now / 1000 + 3600), "abc", "public", now)).toEqual({
+    privacy: "public",
+    synthetic: true,
+  });
+  expect(sent?.method).toBe("PUT");
+  expect(JSON.parse(String(sent?.body))).toEqual({
+    id: "abc",
+    status: {
+      privacyStatus: "public",
+      selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: true,
+      embeddable: true,
+      license: "youtube",
+    },
+  });
+});

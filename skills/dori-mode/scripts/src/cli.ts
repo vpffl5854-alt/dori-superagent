@@ -62,6 +62,7 @@ const USAGE = `dori <command> [options]
   shorts make (--auto|--topic T|--pick N) [--script FILE] [--no-send]
                                        script -> voice -> images -> MoviePy render -> check -> Telegram video
   shorts render <job>                  render and check an existing job again (hooks.render)
+  shorts publish|private [job|latest] make an uploaded short public (or private again); AI-made stays declared
   shorts config [<key> <value>]        show or change voice, background, topics, interests, maxSeconds, font, time
   shorts trend-topics                  topics steered by popular YouTube titles for config shorts.interests
   shorts wiki-topics | wiki-script <title> <out> | wiki-image <title> <out>

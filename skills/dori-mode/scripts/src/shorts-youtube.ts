@@ -130,3 +130,35 @@ export const uploadVideo = async (
   const out = JSON.parse(res.body) as { id: string; status?: { privacyStatus?: string } };
   return { id: out.id, url: `https://youtube.com/shorts/${out.id}`, privacy: out.status?.privacyStatus ?? "?" };
 };
+
+/**
+ * Changes a video's visibility (the owner says "공개해" in Telegram). `part=status` replaces the whole status, so the
+ * declarations are sent again with it and never dropped. Needs the youtube.force-ssl scope.
+ */
+export const setVisibility = async (
+  http: Http,
+  cfg: YoutubeConfig,
+  id: string,
+  privacy: "private" | "unlisted" | "public",
+  now: number,
+): Promise<{ readonly privacy: string; readonly synthetic: boolean | null }> => {
+  const token = await accessToken(http, cfg, now);
+  const res = await http({
+    method: "PUT",
+    url: "https://www.googleapis.com/youtube/v3/videos?part=status",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id,
+      status: {
+        privacyStatus: privacy,
+        selfDeclaredMadeForKids: false,
+        containsSyntheticMedia: true,
+        embeddable: true,
+        license: "youtube",
+      },
+    }),
+  });
+  if (res.status !== 200) throw new ShortsError(`youtube visibility ${res.status}: ${res.body.slice(0, 200)}`);
+  const out = JSON.parse(res.body) as { status?: { privacyStatus?: string; containsSyntheticMedia?: boolean } };
+  return { privacy: out.status?.privacyStatus ?? "?", synthetic: out.status?.containsSyntheticMedia ?? null };
+};

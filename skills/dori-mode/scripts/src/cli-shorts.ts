@@ -1,5 +1,5 @@
 /** dori shorts topics | make | render: the shorts factory (src/shorts.ts, src/shorts-run.ts). */
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
 import { configPath, fill } from "./config.ts";
@@ -11,7 +11,7 @@ import { applySetting, parseTime, SettingError, settingsText, viewSettings } fro
 import { parseHeadwords, trendPrompt, trendTitles } from "./shorts-trend.ts";
 import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
 import { prepareJob, renderAndCheck, shortsPaths } from "./shorts-run.ts";
-import { uploadVideo, videoMeta } from "./shorts-youtube.ts";
+import { setVisibility, uploadVideo, videoMeta } from "./shorts-youtube.ts";
 
 type Sender = { text(text: string): Promise<string>; video(file: string, caption: string): Promise<string> };
 
@@ -99,6 +99,25 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       return void console.log(picked.join("\n"));
     }
     if (sub === "config") return await settings(positionals.slice(1), config.shorts ?? {});
+    if (sub === "publish" || sub === "private") {
+      // `latest` (or nothing) is the newest uploaded job; the owner usually means the one he just watched in Telegram.
+      const yt = cfg.youtube ?? die("no shorts.youtube configured");
+      const want = positionals[1] && positionals[1] !== "latest" ? positionals[1] : undefined;
+      const jobs = (existsSync(paths.jobs) ? readdirSync(paths.jobs) : [])
+        .filter((j) => existsSync(join(paths.jobs, j, "youtube.json")))
+        .sort();
+      const job = want ?? jobs.at(-1) ?? die("no uploaded short yet");
+      const record = JSON.parse(readFileSync(join(paths.jobs, job, "youtube.json"), "utf8")) as {
+        id: string;
+        url: string;
+      };
+      const r = await setVisibility(fetchHttp, yt, record.id, sub === "publish" ? "public" : "private", Date.now());
+      writeFileSync(
+        join(paths.jobs, job, "youtube.json"),
+        JSON.stringify({ ...record, privacy: r.privacy, changedAt: new Date().toISOString() }, null, 2),
+      );
+      return void console.log(`SHORTS_VISIBILITY ${job} ${r.privacy} synthetic=${r.synthetic} ${record.url}`);
+    }
     if (sub === "wiki-script") {
       const [, title = die("wiki-script needs a title"), out = die("wiki-script needs an output path")] = positionals;
       const prompt = scriptPrompt(await wikiPage(fetchHttp, title));
