@@ -58,9 +58,11 @@ const USAGE = `dori <command> [options]
   cost   [--month YYYY-MM] [--write]   per-model calls, input length, cost, failures, retries, success rate from omo session logs
   hunt   [owner/repo ...] [--write]    unclaimed good-first-issues and bugs (config huntRepos by default); --write saves lane briefs
   shorts topics [--no-send]            run the topics slot, save 3 candidates, send them to Telegram to pick
-  shorts make (--topic T|--pick N) [--script FILE] [--no-send]
+  shorts make (--auto|--topic T|--pick N) [--script FILE] [--no-send]
                                        script -> voice -> images -> MoviePy render -> check -> Telegram video
   shorts render <job>                  render and check an existing job again (hooks.render)
+  shorts wiki-topics | wiki-script <title> <out> | wiki-image <title> <out>
+                                       "everything in the world" slots: random Korean Wikipedia topics, script, lead image
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
@@ -114,6 +116,7 @@ const flags = parseArgs({
     pick: { type: "string" },
     script: { type: "string" },
     "no-send": { type: "boolean" },
+    auto: { type: "boolean" },
   },
 });
 

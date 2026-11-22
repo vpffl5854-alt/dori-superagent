@@ -20,6 +20,7 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 
 ## 쇼츠 공장 (지브 승인, 2026-11-22)
 - 영상 요청(`route=video:render`)은 레인을 열지 않고 `{{dori}} shorts make --topic '<주제>'`로 만든다. 주제를 정해야 하면 `{{dori}} shorts topics`로 후보 3개를 텔레그램에 보내고, 지브가 번호로 답하면 `{{dori}} shorts make --pick <번호>`를 돌린다.
+- 매일 오전 9시 launchd `com.dori.shorts-daily`가 `shorts make --auto`로 위키백과 랜덤 주제("세상의 모든 것") 쇼츠를 만들어 지브의 텔레그램 Dori 방(봇 @OmO_pc_bot → 지브 7673226638)으로 보낸다. 로그는 `~/.dori-superagent/logs/shorts-daily.log`.
 - `SHORTS_FAILED`나 `SHORTS_CHECK_FAILED`가 나오면 `{{dori}} render-er <stateDir>/shorts/logs`로 원인을 읽고, `rerun`이 아닌 원인은 지브에게 알린다. 같은 작업을 그냥 다시 돌리지 않는다.
 
 ## 일하는 방식

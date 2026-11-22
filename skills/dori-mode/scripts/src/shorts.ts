@@ -25,6 +25,12 @@ export type ShortsConfig = {
   readonly sendChat?: string;
   readonly sendThread?: number;
   readonly maxSeconds?: number;
+  /** The omo binary and model `dori shorts wiki-script` writes scripts with (default: config defaultModel). */
+  readonly omo?: string;
+  readonly scriptModel?: string;
+  /** Sends a text `{text}` / a video `{file}` with `{caption}` to `{chat}`, when no DORI_TELEGRAM_TOKEN is set. */
+  readonly sendTextArgv?: ArgvTemplate;
+  readonly sendVideoArgv?: ArgvTemplate;
 };
 
 export type Script = { readonly title: string; readonly lines: readonly string[] };

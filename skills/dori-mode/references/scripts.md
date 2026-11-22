@@ -164,6 +164,10 @@ Built in: the MoviePy render (`scripts/shorts/render.py`, 1080x1920, one scene p
 
 Every render writes `<stateDir>/shorts/logs/<job>.log`, ending with its exit code, the folder `dori render-er` reads.
 
+`make --auto` asks nothing: it runs the topics slot and takes one candidate at random (the daily run). Without `DORI_TELEGRAM_TOKEN`, sending goes through `shorts.sendTextArgv` (`{chat}`, `{text}`) and `shorts.sendVideoArgv` (`{chat}`, `{file}`, `{caption}`), for example `agent-telegrambot message upload {chat} {file} --caption {caption}`.
+
+"Everything in the world" slots, built in: `shorts wiki-topics` prints three random Korean Wikipedia articles (stubs under 150 characters and disambiguation pages skipped); `shorts wiki-script <title> <out>` has `shorts.omo -p` (model `shorts.scriptModel`, default `defaultModel`) write the script from that article's intro only, retried once when the reply is not a usable script; `shorts wiki-image <title> <out>` saves the article's lead image when it is a JPEG, PNG or WebP, and nothing otherwise (the scene keeps its plain background). Wikipedia text is CC BY-SA.
+
 ### `dori render-er <log-dir> [--rerun]`
 The render hospital. Every `<job>.log` in the folder is one render job's MoviePy/ffmpeg log. For each failed job it prints `RENDER <job> <cause> -> rerun|hold "<fix>"`, then `RERUN <jobs>` (`-` when none). Causes, checked in order: `ffmpeg-missing`, `codec` (missing encoder, codec the container refuses), `font` (unopenable font file, ImageMagick missing), `audio-duration` (a clip read past its end), `missing-input`, `out-of-memory`, `timeout`; a traceback or error that matches none of them is `unknown`. Only `out-of-memory` and `timeout` are rerun: every other cause is in the setup or the script, so the same job run again unchanged fails the same way, and it is held with its fix. A clean log is not reported. `--rerun` runs `hooks.render` (`{job}` is the job id) for each rerun job and prints `RERUN_OK` or `RERUN_FAILED`; without that hook it stops with an error rather than guess a command.
 
