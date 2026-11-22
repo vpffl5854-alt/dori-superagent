@@ -110,3 +110,13 @@ test("hook templates fill each argument separately, so text with spaces or quote
   });
   expect(argv).toEqual(["notify", "--thread", "chat:1/2", "--text", `it's "done"; rm -rf /`]);
 });
+
+test("backupModels defaults to none and a non-string entry is refused", async () => {
+  const { loadConfig, ConfigError } = await import("../src/config.ts");
+  const dir = (await import("node:fs")).mkdtempSync(`${(await import("node:os")).tmpdir()}/dori-er-`);
+  const path = `${dir}/config.json`;
+  await Bun.write(path, "{}");
+  expect((await loadConfig(path, dir)).backupModels).toEqual([]);
+  await Bun.write(path, JSON.stringify({ backupModels: ["a", 1] }));
+  await expect(loadConfig(path, dir)).rejects.toBeInstanceOf(ConfigError);
+});

@@ -47,6 +47,8 @@ export type DoriConfig = {
   readonly heavySlots: number;
   readonly heavyMaxLoad: number;
   readonly deadPanePatterns: readonly string[];
+  /** Models `dori er` may suggest when a lane's model is rate limited or gone; empty means suggest none. */
+  readonly backupModels: readonly string[];
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
@@ -73,6 +75,7 @@ export const defaultConfig = (home = homedir()): DoriConfig => ({
   heavySlots: 1,
   heavyMaxLoad: 80,
   deadPanePatterns: ["has stopped", "no suitable jobs"],
+  backupModels: [],
   guard: { loadAlert: 150, loadOk: 80, memFreeMinPct: 20, diskFreeMinGb: 50, panesMax: 20 },
   hooks: {},
   repoIdentities: {},
@@ -178,6 +181,11 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
   const raw = (await file.exists()) ? ((await file.json()) as Partial<DoriConfig>) : {};
   checkRuntime(raw.runtime);
   checkSupervision(raw.supervision);
+  if (
+    raw.backupModels !== undefined &&
+    !(Array.isArray(raw.backupModels) && raw.backupModels.every((m) => typeof m === "string"))
+  )
+    throw new ConfigError("invalid backupModels: expected an array of strings");
   const merged: DoriConfig = {
     ...base,
     ...raw,
