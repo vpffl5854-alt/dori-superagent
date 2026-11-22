@@ -6,6 +6,7 @@
  * only a script. The render log goes to `<stateDir>/shorts/logs/<job>.log`, the folder `dori render-er` reads.
  */
 import type { ArgvTemplate } from "./config.ts";
+import type { YoutubeConfig } from "./shorts-youtube.ts";
 
 export type ShortsConfig = {
   /** Prints candidate topics, one per line. */
@@ -33,6 +34,8 @@ export type ShortsConfig = {
   readonly sendVideoArgv?: ArgvTemplate;
   /** The owner's interests: YouTube searches whose popular titles steer the trend topics (`shorts trend-topics`). */
   readonly interests?: readonly string[];
+  /** Upload each checked video to the owner's channel (private by default, AI-made declared). */
+  readonly youtube?: YoutubeConfig;
 };
 
 export type Script = { readonly title: string; readonly lines: readonly string[] };

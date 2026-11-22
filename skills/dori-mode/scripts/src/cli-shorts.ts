@@ -1,6 +1,6 @@
 /** dori shorts topics | make | render: the shorts factory (src/shorts.ts, src/shorts-run.ts). */
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
 import { configPath, fill } from "./config.ts";
 import { fetchHttp } from "./messenger/http.ts";
@@ -11,6 +11,7 @@ import { applySetting, parseTime, SettingError, settingsText, viewSettings } fro
 import { parseHeadwords, trendPrompt, trendTitles } from "./shorts-trend.ts";
 import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
 import { prepareJob, renderAndCheck, shortsPaths } from "./shorts-run.ts";
+import { uploadVideo, videoMeta } from "./shorts-youtube.ts";
 
 type Sender = { text(text: string): Promise<string>; video(file: string, caption: string): Promise<string> };
 
@@ -124,7 +125,9 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       if (!url || !/\.(?:jpe?g|png|webp)$/i.test(url)) return;
       const res = await fetch(url, { headers: { "User-Agent": "dori-shorts/0.1" } });
       if (!res.ok) die(`wiki-image ${res.status}`);
-      return void writeFileSync(out, new Uint8Array(await res.arrayBuffer()));
+      writeFileSync(out, new Uint8Array(await res.arrayBuffer()));
+      // The upload's description credits the image: its source sits beside it.
+      return void writeFileSync(join(dirname(out), "source.txt"), url);
     }
     if (sub === "render") return await finish(cfg, paths, positionals[1] ?? die("render needs a job id"), true);
     die("shorts needs topics, make or render");
@@ -139,9 +142,23 @@ const finish = async (cfg: ShortsConfig, paths: ReturnType<typeof shortsPaths>, 
   if (problems.length > 0) die(`SHORTS_CHECK_FAILED ${job} ${problems.join("; ")}`, 3);
   console.log(`SHORTS_OK ${video}`);
   const out = noSend ? null : sender(cfg);
-  if (!out) return;
-  const title = readFileSync(join(paths.jobs, job, "topic.txt"), "utf8").trim();
-  console.log(`SHORTS_SENT ${await out.video(video, title)}`);
+  const dir = join(paths.jobs, job);
+  const title = readFileSync(join(dir, "topic.txt"), "utf8").trim();
+  if (out) console.log(`SHORTS_SENT ${await out.video(video, title)}`);
+  if (noSend || !cfg.youtube) return;
+  const source = join(dir, "images", "source.txt");
+  const meta = videoMeta(
+    title,
+    parseScript(readFileSync(join(dir, "script.json"), "utf8")),
+    existsSync(source) ? readFileSync(source, "utf8").trim() : null,
+  );
+  const up = await uploadVideo(fetchHttp, cfg.youtube, new Uint8Array(readFileSync(video)), meta, Date.now());
+  writeFileSync(join(dir, "youtube.json"), JSON.stringify({ ...up, at: new Date().toISOString(), meta }, null, 2));
+  console.log(`SHORTS_UPLOADED ${up.url} privacy=${up.privacy}`);
+  if (out)
+    await out.text(
+      `유튜브에 ${up.privacy === "private" ? "비공개로" : up.privacy} 올렸어: ${up.url}\n(AI 생성 표시·위키백과 출처 포함. 공개는 유튜브 스튜디오에서)`,
+    );
 };
 
 const autoTopic = async (cfg: ShortsConfig): Promise<string> => {
