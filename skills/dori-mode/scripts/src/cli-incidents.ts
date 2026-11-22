@@ -93,7 +93,7 @@ const incidents: Command = async ({ values, config }) => {
           [...cfg.harness, "backlog", "add", key, "--brief", brief, "--title", issueTitle(sig), "--priority", "3"],
           { timeoutMs: 60_000 },
         );
-      const text = `🚨 [고장 신고] ${seen.file}에서 같은 고장이 ${seen.count}번 났다:\n${sig.slice(0, 160)}\n이슈: ${url}\n고칠까? 지브가 "ㅇㅇ"하면 리드가 레인을 열어 고친다 (${key}).`;
+      const text = `🚨 [고장 신고] ${seen.file}에서 같은 고장이 ${seen.count}번 났다:\n${sig.slice(0, 160)}\n이슈: ${url}\n리드가 바로 고친다(백업을 만들어 되돌릴 수 있을 때만, 아니면 먼저 묻는다) (${key}).`;
       for (const argv of [cfg.notifyArgv, cfg.leadArgv])
         if (argv?.length) await run(fill(argv, { text }), { timeoutMs: 60_000 });
       console.log(`INCIDENT_REPORTED ${key} ${url}`);

@@ -24,7 +24,7 @@ test("a clean green merge asks the owner to apply it, and names reverts as worth
 test("a conflict lists the files and asks before a lane starts", () => {
   const text = syncMessage({ kind: "conflict", files: ["package.json", "src/a.ts"], commits }, "upstream-1") ?? "";
   expect(text).toContain("충돌 2곳: package.json, src/a.ts");
-  expect(text).toContain('"ㅇㅇ"');
+  expect(text).toContain("반영은 다시 물어본다");
 });
 
 test("the lane's brief keeps the live checkout untouched and leaves applying to the owner's yes", () => {

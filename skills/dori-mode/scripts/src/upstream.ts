@@ -35,7 +35,7 @@ export const syncMessage = (r: SyncResult, key: string): string | null => {
     return [
       ...head,
       `내 변경과 충돌 ${r.files.length}곳: ${r.files.slice(0, 5).join(", ")}`,
-      `레인이 풀고 테스트까지 돌려도 될까? 지브가 "ㅇㅇ"하면 시작한다 (${key}).`,
+      `레인이 임시 폴더에서 풀고 테스트까지 돌린다. 반영은 다시 물어본다 (${key}).`,
     ].join("\n");
   return [...head, `합쳐지긴 하는데 테스트가 깨진다 (브랜치 ${r.branch}). 레인이 고쳐도 될까? (${key})`].join("\n");
 };
