@@ -1,0 +1,73 @@
+{
+  "youtube": {
+    "url": "https://www.youtube.com/@{handle}/videos",
+    "fields": {
+      "link": {
+        "selector": "a[href^=\"/watch?v=\"]",
+        "attr": "href",
+        "pattern": "^/watch\\?v=[\\w-]{11}",
+        "min": 3
+      },
+      "title": {
+        "selector": "a.ytLockupMetadataViewModelTitle > span.ytAttributedStringHost",
+        "attr": "text",
+        "pattern": "\\S{2,}",
+        "min": 3,
+        "pair": "link"
+      }
+    }
+  },
+  "instagram": {
+    "url": "https://www.instagram.com/{handle}/",
+    "fields": {
+      "link": {
+        "selector": "a[href*='/p/'], a[href*='/reel/']",
+        "attr": "href",
+        "pattern": "^/(?:[\\w.]+/)?(?:p|reel)/[\\w-]+/?$",
+        "min": 3
+      },
+      "caption": {
+        "selector": "a[href*='/p/'] img[alt], a[href*='/reel/'] img[alt]",
+        "attr": "alt",
+        "pattern": "\\S{3,}",
+        "min": 1,
+        "pair": "link"
+      }
+    }
+  },
+  "threads": {
+    "url": "https://www.threads.com/@{handle}",
+    "fields": {
+      "link": {
+        "selector": "a[href*='/post/']",
+        "attr": "href",
+        "pattern": "^/@[\\w.]+/post/[\\w-]+$",
+        "min": 3
+      },
+      "time": {
+        "selector": "a[href*='/post/'] time",
+        "attr": "datetime",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T",
+        "min": 3,
+        "pair": "link"
+      }
+    }
+  },
+  "tiktok": {
+    "url": "https://www.tiktok.com/@{handle}",
+    "fields": {
+      "followers": {
+        "selector": "[data-e2e='followers-count']",
+        "attr": "text",
+        "pattern": "^[\\d.,]+[KMB만천억]?$",
+        "min": 1
+      },
+      "likes": {
+        "selector": "[data-e2e='likes-count']",
+        "attr": "text",
+        "pattern": "^[\\d.,]+[KMB만천억]?$",
+        "min": 1
+      }
+    }
+  }
+}

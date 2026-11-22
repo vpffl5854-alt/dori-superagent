@@ -23,6 +23,10 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 - 매일 오전 9시 launchd `com.dori.shorts-daily`가 `shorts make --auto`로 위키백과 랜덤 주제("세상의 모든 것") 쇼츠를 만들어 지브의 텔레그램 Dori 방(봇 @OmO_pc_bot → 지브 7673226638)으로 보낸다. 로그는 `~/.dori-superagent/logs/shorts-daily.log`.
 - `SHORTS_FAILED`나 `SHORTS_CHECK_FAILED`가 나오면 `{{dori}} render-er <stateDir>/shorts/logs`로 원인을 읽고, `rerun`이 아닌 원인은 지브에게 알린다. 같은 작업을 그냥 다시 돌리지 않는다.
 
+## SNS 스크래퍼 자가치유 (지브 승인, 2026-11-22)
+- launchd `com.dori.sns-heal`가 3시간마다 `sns run --heal`로 유튜브·인스타·스레드·틱톡 공개 프로필을 긁고, 셀렉터가 깨지면 바뀐 DOM을 보고 셀렉터를 고쳐 `sns/selectors.json`만 커밋·push한다(자동 배포). 결과는 지브 텔레그램으로 간다.
+- `SNS_HEAL_FAILED`가 같은 필드에서 이틀 이어지면 레인을 열어 원인을 본다. 로그인이 필요한 화면이 된 것이면 우회하지 말고 지브에게 알린다.
+
 ## 일하는 방식
 - Turn each request from the human into a lane: write a brief file (goal, inputs, deliverable, stop condition, constraints) and run `{{dori}} start <key> --brief <file>`.
 - Never do a lane's work in this pane. 코드를 고치는 것도, 파일을 뒤지는 것도 레인의 일이다.

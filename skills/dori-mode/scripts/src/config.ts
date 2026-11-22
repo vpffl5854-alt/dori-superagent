@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { RuntimeKind } from "../../../../src/runtime/types.ts";
 import type { ShortsConfig } from "./shorts.ts";
+import type { SnsConfig } from "./sns.ts";
 import type { SupervisionOptions } from "./supervision-observe.ts";
 import type { CommitIdentity } from "./verify-pr-check.ts";
 
@@ -56,6 +57,8 @@ export type DoriConfig = {
   readonly huntRepos: readonly string[];
   /** The shorts factory's slots and send target (`dori shorts`); absent means no slot is filled. */
   readonly shorts?: ShortsConfig;
+  /** The SNS scrapers and their self-healing (`dori sns`). */
+  readonly sns?: SnsConfig;
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
@@ -183,22 +186,19 @@ const checkSupervision = (value: unknown): void => {
     throw new ConfigError("invalid supervision gitActivity: expected true or false");
 };
 
+const checkStrings = (name: string, value: unknown, shape: RegExp, expected: string): void => {
+  if (value !== undefined && !(Array.isArray(value) && value.every((v) => typeof v === "string" && shape.test(v))))
+    throw new ConfigError(`invalid ${name}: expected ${expected}`);
+};
+
 export const loadConfig = async (path = configPath(), home = homedir()): Promise<DoriConfig> => {
   const base = defaultConfig(home);
   const file = Bun.file(path);
   const raw = (await file.exists()) ? ((await file.json()) as Partial<DoriConfig>) : {};
   checkRuntime(raw.runtime);
   checkSupervision(raw.supervision);
-  if (
-    raw.backupModels !== undefined &&
-    !(Array.isArray(raw.backupModels) && raw.backupModels.every((m) => typeof m === "string"))
-  )
-    throw new ConfigError("invalid backupModels: expected an array of strings");
-  if (
-    raw.huntRepos !== undefined &&
-    !(Array.isArray(raw.huntRepos) && raw.huntRepos.every((r) => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r)))
-  )
-    throw new ConfigError("invalid huntRepos: expected an array of owner/repo strings");
+  checkStrings("backupModels", raw.backupModels, /./, "an array of strings");
+  checkStrings("huntRepos", raw.huntRepos, /^[\w.-]+\/[\w.-]+$/, "an array of owner/repo strings");
   const merged: DoriConfig = {
     ...base,
     ...raw,

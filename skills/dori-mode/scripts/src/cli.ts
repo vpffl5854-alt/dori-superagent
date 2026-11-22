@@ -9,6 +9,7 @@ import { opsCommands } from "./cli-ops.ts";
 import { huntCommands } from "./cli-hunt.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
+import { snsCommands } from "./cli-sns.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { LaunchError } from "./launch.ts";
@@ -63,6 +64,8 @@ const USAGE = `dori <command> [options]
   shorts render <job>                  render and check an existing job again (hooks.render)
   shorts wiki-topics | wiki-script <title> <out> | wiki-image <title> <out>
                                        "everything in the world" slots: random Korean Wikipedia topics, script, lead image
+  sns scrape <platform> <handle> | run [--heal] | heal
+                                       public YouTube/Instagram/Threads/TikTok profiles; heal rewrites a broken selector
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
@@ -117,6 +120,7 @@ const flags = parseArgs({
     script: { type: "string" },
     "no-send": { type: "boolean" },
     auto: { type: "boolean" },
+    heal: { type: "boolean" },
   },
 });
 
@@ -128,6 +132,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...routeCommands,
   ...huntCommands,
   ...shortsCommands,
+  ...snsCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

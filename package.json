@@ -26,5 +26,8 @@
   },
   "engines": {
     "bun": ">=1.4.4"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.1"
   }
 }
