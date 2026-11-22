@@ -1,9 +1,11 @@
-/** dori route, er and cost: the central router's pick, the infirmary sweep over working lanes, the monthly cost report. */
+/** dori route, er, cost and render-er: the router's pick, the infirmary, the monthly cost report, the render hospital. */
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Command, die, every } from "./cli-context.ts";
 import { aggregate, type Call, parseSession, renderReport } from "./cost-report.ts";
 import { erTick, TAIL_LINES } from "./er.ts";
+import { fill } from "./config.ts";
+import { planRenders, renderLine } from "./render-er.ts";
 import { sessionOf } from "./registry.ts";
 import { Reports } from "./reports.ts";
 import { route } from "./router.ts";
@@ -57,4 +59,26 @@ const cost: Command = async ({ opt, values, config }) => {
   console.log(`COST_REPORT ${join(dir, `cost-${month}.md`)}`);
 };
 
-export const routeCommands: Readonly<Record<string, Command>> = { route: routeCommand, er, cost };
+/** Each `<job>.log` in the folder is one render job; only the jobs a rerun can cure are run again, through hooks.render. */
+const renderEr: Command = async ({ key, values, config }) => {
+  const dir = key ?? die("render-er needs the folder of render logs");
+  const jobs = readdirSync(dir)
+    .filter((f) => f.endsWith(".log"))
+    .map((f) => ({ job: f.slice(0, -4), log: readFileSync(join(dir, f), "utf8") }));
+  const plan = planRenders(jobs);
+  for (const f of plan.findings) console.log(renderLine(f));
+  console.log(`RERUN ${plan.rerun.join(" ") || "-"}`);
+  if (values["rerun"] !== true || plan.rerun.length === 0) return;
+  const hook = config.hooks.render ?? die("no hooks.render configured: nothing can run a job again");
+  for (const job of plan.rerun) {
+    const r = await run(fill(hook, { job }));
+    console.log(`RERUN_${r.code === 0 ? "OK" : "FAILED"} ${job}${r.code === 0 ? "" : ` exit=${r.code}`}`);
+  }
+};
+
+export const routeCommands: Readonly<Record<string, Command>> = {
+  route: routeCommand,
+  er,
+  cost,
+  "render-er": renderEr,
+};

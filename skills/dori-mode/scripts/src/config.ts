@@ -13,6 +13,8 @@ export type Hooks = {
   readonly transcribe?: ArgvTemplate;
   /** How the Discord room's lane posts its answer: `{channel}`, `{message}` and `{text}`. */
   readonly discordReply?: ArgvTemplate;
+  /** How `dori render-er --rerun` runs one render job again: `{job}` is the job id (its log file name). */
+  readonly render?: ArgvTemplate;
 };
 
 export type GuardThresholds = {

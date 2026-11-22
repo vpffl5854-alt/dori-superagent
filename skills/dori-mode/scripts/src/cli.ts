@@ -54,6 +54,7 @@ const USAGE = `dori <command> [options]
   transcribe <audio-file>              run hooks.transcribe and print the text
   route  --text TEXT [--no-devin]      print the central router's pick (chat, coding to lane or Devin, video, status)
   cost   [--month YYYY-MM] [--write]   per-model calls, input length, cost, failures, retries, success rate from omo session logs
+  render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
                                        the Dori posted in (any helper), DMs and channels with unread mentions`;
@@ -101,6 +102,7 @@ const flags = parseArgs({
     open: { type: "boolean" },
     "no-devin": { type: "boolean" },
     month: { type: "string" },
+    rerun: { type: "boolean" },
   },
 });
 
