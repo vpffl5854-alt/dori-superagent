@@ -80,7 +80,7 @@
         "min": 5
       },
       "title": {
-        "selector": "a#video-title",
+        "selector": "a.ytLockupMetadataViewModelTitle > span.ytAttributedStringHost",
         "attr": "text",
         "pattern": "\\S{2,}",
         "min": 5,
