@@ -6,6 +6,7 @@ import { journalCommands, journalErrors } from "./cli-journal.ts";
 import { laneCommands } from "./cli-lanes.ts";
 import { messengerCommands, messengerErrors } from "./cli-messenger.ts";
 import { opsCommands } from "./cli-ops.ts";
+import { huntCommands } from "./cli-hunt.ts";
 import { routeCommands } from "./cli-route.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
@@ -54,6 +55,7 @@ const USAGE = `dori <command> [options]
   transcribe <audio-file>              run hooks.transcribe and print the text
   route  --text TEXT [--no-devin]      print the central router's pick (chat, coding to lane or Devin, video, status)
   cost   [--month YYYY-MM] [--write]   per-model calls, input length, cost, failures, retries, success rate from omo session logs
+  hunt   [owner/repo ...] [--write]    unclaimed good-first-issues and bugs (config huntRepos by default); --write saves lane briefs
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
   er     [--loop MIN]                  infirmary: ER <key> <rate-limit|model-dead|context-overflow|auth> -> prescription
   inbound slack|telegram [--loop MIN]  print INBOUND lines: Slack unread thread replies / Telegram owner DMs, edits and media + configured topic
@@ -112,6 +114,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...opsCommands,
   ...messengerCommands,
   ...routeCommands,
+  ...huntCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

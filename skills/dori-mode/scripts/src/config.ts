@@ -51,6 +51,8 @@ export type DoriConfig = {
   readonly deadPanePatterns: readonly string[];
   /** Models `dori er` may suggest when a lane's model is rate limited or gone; empty means suggest none. */
   readonly backupModels: readonly string[];
+  /** `owner/repo` list `dori hunt` reads when no repository is named on the command line. */
+  readonly huntRepos: readonly string[];
   readonly guard: GuardThresholds;
   readonly hooks: Hooks;
   /** Expected Git author and committer per lowercase `owner/repo`, for `verify-pr` and the lane footer. */
@@ -78,6 +80,7 @@ export const defaultConfig = (home = homedir()): DoriConfig => ({
   heavyMaxLoad: 80,
   deadPanePatterns: ["has stopped", "no suitable jobs"],
   backupModels: [],
+  huntRepos: [],
   guard: { loadAlert: 150, loadOk: 80, memFreeMinPct: 20, diskFreeMinGb: 50, panesMax: 20 },
   hooks: {},
   repoIdentities: {},
@@ -188,6 +191,11 @@ export const loadConfig = async (path = configPath(), home = homedir()): Promise
     !(Array.isArray(raw.backupModels) && raw.backupModels.every((m) => typeof m === "string"))
   )
     throw new ConfigError("invalid backupModels: expected an array of strings");
+  if (
+    raw.huntRepos !== undefined &&
+    !(Array.isArray(raw.huntRepos) && raw.huntRepos.every((r) => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r)))
+  )
+    throw new ConfigError("invalid huntRepos: expected an array of owner/repo strings");
   const merged: DoriConfig = {
     ...base,
     ...raw,
