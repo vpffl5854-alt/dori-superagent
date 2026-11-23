@@ -14,7 +14,7 @@ import type {
   SessionRuntime,
   SubmitResult,
 } from "../types.ts";
-import { deliver, keys, read, typeIntoShell } from "./deliver.ts";
+import { deliver, keys, read, submitTyped, typeIntoShell } from "./deliver.ts";
 import { closeTab, keepAsTab } from "./app.ts";
 import { probe } from "./probe.ts";
 import { close, create, list, selfRef, start } from "./sessions.ts";
@@ -71,16 +71,12 @@ export class HcRuntime implements SessionRuntime {
   }
 
   deliver(ref: SessionRef, text: string, opts?: DeliverOptions): Promise<DeliverOutcome> {
-    return deliver(this.exec, ref.id, text, opts);
+    return deliver(this.exec, ref.id, text, opts, this.sleep);
   }
 
-  /**
-   * Always `changed`, touching nothing: hc's send pastes and presses Enter in one step, so it never leaves typed text
-   * waiting for an Enter. A `typed` entry can only come from another runtime (a migrated record), and pressing Enter
-   * here would submit whatever a person has in this input instead (#108).
-   */
-  async submitTyped(_ref: SessionRef, _into: AgentIdentity): Promise<SubmitResult> {
-    return "changed";
+  /** Enter for text an earlier delivery left in the input (omo missed hc's Enter), into the same agent only (#108). */
+  submitTyped(ref: SessionRef, into: AgentIdentity): Promise<SubmitResult> {
+    return submitTyped(this.exec, ref.id, into, this.sleep);
   }
 
   typeIntoShell(ref: SessionRef, text: string): Promise<boolean> {

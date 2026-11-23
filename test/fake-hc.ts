@@ -34,7 +34,13 @@ export type FakeKnobs = {
   getError?: string;
   /** `read` answers this error kind for every terminal. */
   readError?: string;
+  /** omo misses hc's Enter: a sent text stays in the input box until this many more Enter presses (a large number: never). */
+  enterMisses?: number;
 };
+
+/** omo's screen with `draft` in its input box between the two rules. */
+export const omoScreen = (draft = ""): string =>
+  `answer\n${"─".repeat(20)}\n❯ ${draft}\n${"─".repeat(20)}\n~/w • 1K/200K`;
 
 const EXIT: Readonly<Record<string, number>> = {
   usage: 2,
@@ -76,6 +82,8 @@ export function terminal(over: Partial<FakeTerminal> = {}): FakeTerminal {
 export class FakeHc {
   readonly calls: string[][] = [];
   readonly sent: { id: string; text: string }[] = [];
+  /** Enter presses each terminal's input still needs before a sent text leaves it (knobs.enterMisses). */
+  private readonly pending = new Map<string, number>();
   readonly terminals = new Map<string, FakeTerminal>();
   knobs: FakeKnobs = {};
   private next = 1;
@@ -104,9 +112,16 @@ export class FakeHc {
       case "send":
         return this.send(id, t, args);
       case "keys":
-        return t.state === "finished"
-          ? fail("finished", `${id} has finished`)
-          : ok({ status: t.status?.state ?? null, turn: t.turn });
+        if (t.state === "finished") return fail("finished", `${id} has finished`);
+        if (args.includes("enter") && this.pending.has(id)) {
+          const left = (this.pending.get(id) ?? 0) - 1;
+          if (left > 0) this.pending.set(id, left);
+          else {
+            this.pending.delete(id);
+            t.screen = omoScreen();
+          }
+        }
+        return ok({ status: t.status?.state ?? null, turn: t.turn });
       case "kill":
         t.state = "finished";
         return ok({ address: id, ...t });
@@ -170,6 +185,10 @@ export class FakeHc {
     const text = args[args.length - 1] ?? "";
     this.sent.push({ id, text });
     t.turn += 1;
+    if (k.enterMisses !== undefined) {
+      t.screen = omoScreen(text);
+      this.pending.set(id, k.enterMisses);
+    }
     return ok({ status: t.status?.state ?? null, turn: t.turn, started: k.started === undefined ? true : k.started });
   }
 

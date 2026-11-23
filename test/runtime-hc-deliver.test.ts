@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DeliverOutcome } from "../src/runtime/types.ts";
-import { type FakeHc, terminal } from "./fake-hc.ts";
+import { type FakeHc, omoScreen, terminal } from "./fake-hc.ts";
 import { rig, T1 } from "./hc-rig.ts";
 
 describe("deliver", () => {
@@ -130,5 +130,33 @@ describe("deliver", () => {
     expect(out.detail.length).toBeGreaterThan(0);
     expect(out.detail).not.toContain("secret text");
     expect(String(out.failure instanceof Error ? out.failure.message : out.failure)).not.toContain("secret text");
+  });
+
+  test("omo missed hc's Enter: Enter again until the input is empty, delivered, never typed twice", async () => {
+    const { fake, rt } = rig({ t1: terminal({ screen: omoScreen() }) });
+    fake.knobs.enterMisses = 2;
+    expect((await rt.deliver(T1, "hello")).kind).toBe("delivered");
+    expect(fake.calls.filter((c) => c[0] === "keys")).toEqual([
+      ["keys", "t1", "enter"],
+      ["keys", "t1", "enter"],
+    ]);
+    expect(fake.sent).toEqual([{ id: "t1", text: "hello" }]);
+  });
+
+  test("an Enter that never lands leaves the text typed for the inbox to submit later, not resent", async () => {
+    const { fake, rt } = rig({
+      t1: terminal({ screen: omoScreen(), foreground: { name: "omo", argv: ["omo"], pid: 7 } }),
+    });
+    fake.knobs.enterMisses = 99;
+    const out = await rt.deliver(T1, "hello");
+    if (out.kind !== "typed") throw new Error(`expected typed, got ${out.kind}`);
+    expect(out.into).toEqual({ agent: "omo", pgid: 7 });
+    expect(fake.sent).toHaveLength(1);
+  });
+
+  test("a screen with no omo input box is no evidence of a missed Enter", async () => {
+    const { fake, rt } = rig({ t1: terminal({ screen: "plain program output" }) });
+    expect((await rt.deliver(T1, "hello")).kind).toBe("delivered");
+    expect(fake.calls.some((c) => c[0] === "keys")).toBe(false);
   });
 });

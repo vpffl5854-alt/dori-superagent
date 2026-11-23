@@ -4,10 +4,14 @@ import { terminal } from "./fake-hc.ts";
 import { rig, T1 } from "./hc-rig.ts";
 
 describe("typed text, shells, keys", () => {
-  test("submitTyped is always changed and touches nothing (hc sends paste+Enter atomically)", async () => {
-    const { fake, rt } = rig({ t1: terminal() });
-    expect(await rt.submitTyped(T1, { agent: "omo", pgid: 4242 })).toBe("changed");
-    expect(fake.calls).toEqual([]);
+  test("submitTyped presses only Enter into the agent the text was typed into; changed for another agent", async () => {
+    const { fake, rt } = rig({ t1: terminal({ foreground: { name: "omo", argv: ["omo"], pid: 4242 } }) });
+    expect(await rt.submitTyped(T1, { agent: "omo", pgid: 4242 })).toBe("submitted");
+    expect(fake.calls.filter((c) => c[0] === "keys")).toEqual([["keys", "t1", "enter"]]);
+    expect(fake.sent).toEqual([]);
+    expect(await rt.submitTyped(T1, { agent: "omo", pgid: 1 })).toBe("changed");
+    expect(await rt.submitTyped(T1, { agent: "pi" })).toBe("changed");
+    expect(fake.calls.filter((c) => c[0] === "keys")).toHaveLength(1);
   });
 
   test("typeIntoShell sends into an unreported shell without a status gate", async () => {
