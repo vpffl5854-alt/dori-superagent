@@ -7,7 +7,7 @@ import type { Http } from "./messenger/http.ts";
 import { ShortsError } from "./shorts.ts";
 
 const API = "https://ko.wikipedia.org/w/api.php";
-const UA = { "User-Agent": "dori-shorts/0.1 (https://github.com/vpffl5854-alt/dori-superagent)" };
+export const WIKI_UA = { "User-Agent": "dori-shorts/0.1 (https://github.com/vpffl5854-alt/dori-superagent)" };
 /** An intro shorter than this is a stub: too little to say for 30 seconds. */
 export const MIN_EXTRACT = 150;
 
@@ -46,9 +46,15 @@ const get = async (http: Http, params: Record<string, string>): Promise<Raw> => 
     piprop: "original",
     ...params,
   });
-  const res = await http({ method: "GET", url: `${API}?${q}`, headers: UA });
+  const res = await http({ method: "GET", url: `${API}?${q}`, headers: WIKI_UA });
   if (res.status !== 200) throw new ShortsError(`wikipedia ${res.status}`);
   return JSON.parse(res.body) as Raw;
+};
+
+/** The lead image without Wikipedia's tracking query, when it is a format the renderer reads (not SVG or GIF). */
+export const renderableImage = (url: string): string | null => {
+  const clean = url.split(/[?#]/)[0] ?? "";
+  return /\.(?:jpe?g|png|webp)$/i.test(clean) ? clean : null;
 };
 
 /** Twelve random articles; the three with the longest intros (a rough stand-in for "has something to tell"). */

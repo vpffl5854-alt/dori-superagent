@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import type { Http } from "../src/messenger/http.ts";
 import { ShortsError } from "../src/shorts.ts";
-import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "../src/shorts-wiki.ts";
+import { extractJson, MIN_EXTRACT, randomTopics, renderableImage, scriptPrompt, wikiPage } from "../src/shorts-wiki.ts";
 
 const long = (n: number) => "가".repeat(n);
 
@@ -48,4 +48,12 @@ test("the prompt holds the model to the intro's facts and the JSON shape", () =>
 test("the JSON object is cut out of a reply wrapped in prose or a code fence", () => {
   expect(extractJson('여기 대본:\n```json\n{"title":"t","lines":["a"]}\n```')).toBe('{"title":"t","lines":["a"]}');
   expect(() => extractJson("대본을 못 썼어요")).toThrow(ShortsError);
+});
+
+test("a lead image keeps its format past Wikipedia's tracking query; SVG and GIF stay unusable", () => {
+  const base = "https://upload.wikimedia.org/wikipedia/commons/f/f6/White-noise.png";
+  expect(renderableImage(`${base}?utm_source=ko.wikipedia.org&utm_campaign=api`)).toBe(base);
+  expect(renderableImage("https://x/a/Cat.JPG")).toBe("https://x/a/Cat.JPG");
+  expect(renderableImage("https://x/a/Psi.svg?utm_source=ko")).toBeNull();
+  expect(renderableImage("https://x/a/Anim.gif")).toBeNull();
 });

@@ -9,7 +9,15 @@ import { realClock, run } from "./run.ts";
 import { jobId, parseScript, parseTopics, ShortsError, type ShortsConfig, topicsMessage } from "./shorts.ts";
 import { applySetting, parseTime, SettingError, settingsText, viewSettings } from "./shorts-settings.ts";
 import { parseHeadwords, TOPICS_SLOT_MS, TREND_MODEL_MS, trendPrompt, trendTitles } from "./shorts-trend.ts";
-import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
+import {
+  extractJson,
+  MIN_EXTRACT,
+  randomTopics,
+  renderableImage,
+  scriptPrompt,
+  WIKI_UA,
+  wikiPage,
+} from "./shorts-wiki.ts";
 import { prepareJob, renderAndCheck, shortsPaths } from "./shorts-run.ts";
 import { setVisibility, uploadVideo, videoMeta } from "./shorts-youtube.ts";
 
@@ -137,14 +145,22 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
     }
     if (sub === "wiki-image") {
       const [, title = die("wiki-image needs a title"), out = die("wiki-image needs an output path")] = positionals;
-      const url = (await wikiPage(fetchHttp, title)).image;
+      const lead = (await wikiPage(fetchHttp, title)).image;
+      const url = lead ? renderableImage(lead) : null;
       // No lead image, or a format the renderer cannot read (SVG, GIF): the scene keeps its plain background.
-      if (!url || !/\.(?:jpe?g|png|webp)$/i.test(url)) return;
-      const res = await fetch(url, { headers: { "User-Agent": "dori-shorts/0.1" } });
-      if (!res.ok) die(`wiki-image ${res.status}`);
+      if (!url) return;
+      // Every line of a job shows the same lead image: fetch it once, copy it after (Wikimedia answers 429 to repeats).
+      const source = join(dirname(out), "source.txt");
+      const have =
+        existsSync(source) &&
+        readFileSync(source, "utf8").trim() === url &&
+        readdirSync(dirname(out)).find((f) => f !== "source.txt");
+      if (have) return void copyFileSync(join(dirname(out), have), out);
+      const res = await fetch(url, { headers: WIKI_UA });
+      if (!res.ok) return void console.error(`wiki-image ${res.status}: this scene keeps its plain background`);
       writeFileSync(out, new Uint8Array(await res.arrayBuffer()));
       // The upload's description credits the image: its source sits beside it.
-      return void writeFileSync(join(dirname(out), "source.txt"), url);
+      return void writeFileSync(source, url);
     }
     if (sub === "render") return await finish(cfg, paths, positionals[1] ?? die("render needs a job id"), true);
     die("shorts needs topics, make or render");
