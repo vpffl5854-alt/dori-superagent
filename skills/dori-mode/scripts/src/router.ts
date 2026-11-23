@@ -20,7 +20,7 @@ const STATUS =
   /상태|진행\s*상황|어디까지|진척|현황|레인\s*목록|뭐\s*하고\s*있|\bstatus\b|\bprogress\b|what'?s running/i;
 /** Words that only ever mean code: they win over video and status words in the same message. */
 const CODE_STRONG =
-  /코드|코딩|버그|리팩터|리팩토링|구현|커밋|브랜치|테스트|타입\s*에러|함수|컴파일|\bpr\b|\bci\b|\bbugs?\b|refactor|implement|\bcommit\b|\bbranch\b|\btests?\b|\.(?:ts|tsx|js|py|rs|go)\b|```/i;
+  /코드|코딩|버그|리팩터|리팩토링|구현|커밋|브랜치|테스트\s*(?:가|를|을|이|도|는)?\s*(?:깨|실패|통과|돌려|실행|작성|추가|짜|고쳐|케이스|코드|커버리지)|타입\s*에러|함수|컴파일|\bpr\b|\bci\b|\bbugs?\b|refactor|implement|\bcommit\b|\bbranch\b|\btests?\b|\.(?:ts|tsx|js|py|rs|go)\b|```/i;
 /** Words that mean code unless the message is about a video ("자막 고쳐" is a video edit). */
 const CODE_WEAK = /고쳐|빌드|배포|마이그레이션|\bfix\b|\bbuild\b|\bdeploy\b|\bmigrat/i;
 const VIDEO =

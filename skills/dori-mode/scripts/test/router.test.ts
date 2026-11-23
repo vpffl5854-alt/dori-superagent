@@ -39,6 +39,9 @@ test("a code word beats a video word: a bug in the render code is coding work", 
 
 test("a code word beats a status word: asking to fix the status command is coding work", () => {
   expect(classify("status 명령 테스트가 깨졌어")).toBe("coding");
+  expect(classify("테스트 돌려줘")).toBe("coding");
+  expect(classify("도리테스트 1")).toBe("chat");
+  expect(classify("수신 테스트 중이야")).toBe("chat");
 });
 
 test("chat goes to the fast model, video to a render job, status to the status report", () => {
