@@ -34,7 +34,11 @@ const NEEDS_AUTH = /로그인|인증|login|oauth|2fa/i;
 const DEVIN_WORK =
   /리팩터|리팩토링|구현|여러\s*파일|원인|추적|마이그레이션|refactor|implement|root\s*cause|investigate|migrat/i;
 
+/** The owner naming the lead ("리드 이거 해줘", "리드한테 전달해") always means work for the lead, whatever the words. */
+const LEAD = /(?:^|[^가-힣])리드/;
+
 export const classify = (text: string): RouteKind => {
+  if (LEAD.test(text)) return "coding";
   const strong = CODE_STRONG.test(text);
   if (STATUS.test(text) && !strong) return "status";
   if (strong) return "coding";

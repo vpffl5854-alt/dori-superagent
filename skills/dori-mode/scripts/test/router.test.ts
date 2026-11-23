@@ -41,6 +41,9 @@ test("a code word beats a status word: asking to fix the status command is codin
   expect(classify("status 명령 테스트가 깨졌어")).toBe("coding");
   expect(classify("테스트 돌려줘")).toBe("coding");
   expect(classify("도리테스트 1")).toBe("chat");
+  expect(classify("리드한테 전달해 이거 정리해줘")).toBe("coding");
+  expect(classify("@도리 리드 작업시켜")).toBe("coding");
+  expect(classify("그리드 레이아웃 예쁘다")).toBe("chat");
   expect(classify("수신 테스트 중이야")).toBe("chat");
 });
 
