@@ -30,16 +30,20 @@ def background(path: Path | None, duration: float):
 
 
 def caption(text: str, font: str, duration: float, y: int, size: int):
+    # A translucent plate behind the words: white text over a busy photo (noise, textures) is unreadable with an
+    # outline alone, and the plate keeps every frame legible whatever the background happens to be.
     clip = TextClip(
         font=font,
         text=text,
         font_size=size,
         color="white",
         stroke_color="black",
-        stroke_width=4,
+        stroke_width=8,
         method="caption",
         size=(W - 120, None),
         text_align="center",
+        bg_color=(0, 0, 0, 160),
+        margin=(28, 28),
         duration=duration,
     )
     return clip.with_position(("center", y))
