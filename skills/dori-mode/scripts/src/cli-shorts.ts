@@ -8,7 +8,7 @@ import { Telegram, type TgTarget } from "./messenger/telegram.ts";
 import { realClock, run } from "./run.ts";
 import { jobId, parseScript, parseTopics, ShortsError, type ShortsConfig, topicsMessage } from "./shorts.ts";
 import { applySetting, parseTime, SettingError, settingsText, viewSettings } from "./shorts-settings.ts";
-import { parseHeadwords, trendPrompt, trendTitles } from "./shorts-trend.ts";
+import { parseHeadwords, TOPICS_SLOT_MS, TREND_MODEL_MS, trendPrompt, trendTitles } from "./shorts-trend.ts";
 import { extractJson, MIN_EXTRACT, randomTopics, scriptPrompt, wikiPage } from "./shorts-wiki.ts";
 import { prepareJob, renderAndCheck, shortsPaths } from "./shorts-run.ts";
 import { setVisibility, uploadVideo, videoMeta } from "./shorts-youtube.ts";
@@ -50,7 +50,7 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
   try {
     if (sub === "topics") {
       const slot = cfg.topics?.length ? cfg.topics : die("no topics slot: fill config shorts.topics");
-      const r = await run([...slot], { timeoutMs: 120_000 });
+      const r = await run([...slot], { timeoutMs: TOPICS_SLOT_MS });
       if (r.code !== 0) die(`topics slot failed (exit ${r.code}): ${r.err.slice(0, 200)}`);
       const topics = parseTopics(r.out);
       if (topics.length === 0) die("the topics slot printed no topic");
@@ -85,9 +85,7 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       if (titles.length > 0 && cfg.omo) {
         const r = await run(
           [cfg.omo, "--model", cfg.scriptModel ?? config.defaultModel, "-p", trendPrompt(titles, cfg.interests ?? [])],
-          {
-            timeoutMs: 180_000,
-          },
+          { timeoutMs: TREND_MODEL_MS },
         );
         for (const word of parseHeadwords(r.out).sort(() => Math.random() - 0.5)) {
           if (picked.length >= 2) break;
@@ -182,7 +180,7 @@ const finish = async (cfg: ShortsConfig, paths: ReturnType<typeof shortsPaths>, 
 
 const autoTopic = async (cfg: ShortsConfig): Promise<string> => {
   const slot = cfg.topics?.length ? cfg.topics : die("--auto needs config shorts.topics");
-  const r = await run([...slot], { timeoutMs: 120_000 });
+  const r = await run([...slot], { timeoutMs: TOPICS_SLOT_MS });
   const topics = parseTopics(r.out);
   if (r.code !== 0 || topics.length === 0) die(`SHORTS_FAILED topics slot gave nothing (exit ${r.code})`);
   return topics[Math.floor(Math.random() * topics.length)] as string;

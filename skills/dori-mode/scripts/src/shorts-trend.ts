@@ -11,6 +11,10 @@ import { latestName } from "./sns.ts";
 /** Search results older than this are not "what is popular now". */
 export const FRESH_MS = 2 * 86_400_000;
 
+/** The model picking headwords may take this long; the topics slot around it must outlast it plus the wiki lookups. */
+export const TREND_MODEL_MS = 180_000;
+export const TOPICS_SLOT_MS = TREND_MODEL_MS + 120_000;
+
 export const trendTitles = (latestDir: string, interests: readonly string[], now: number): string[] =>
   interests.flatMap((interest) => {
     const path = join(latestDir, latestName("youtube-search", interest));

@@ -116,6 +116,6 @@ export const latestName = (platform: string, handle: string): string =>
 export const CANARIES = ["youtube:YouTube", "instagram:instagram", "threads:zuck", "tiktok:tiktok"] as const;
 
 export const parseTarget = (t: string): { platform: string; handle: string } | null => {
-  const m = /^([a-z-]+):@?(\S+)$/u.exec(t.trim());
+  const m = /^([a-z-]+):@?(\S(?:.*\S)?)$/u.exec(t.trim());
   return m?.[1] && m[2] ? { platform: m[1], handle: m[2] } : null;
 };

@@ -74,13 +74,13 @@
     "url": "https://www.youtube.com/results?search_query={handle}&sp=CAMSAhAB",
     "fields": {
       "link": {
-        "selector": "a#video-title",
+        "selector": "a#video-title, a.ytLockupMetadataViewModelTitle",
         "attr": "href",
         "pattern": "^/watch\\?v=[\\w-]{11}",
         "min": 5
       },
       "title": {
-        "selector": "span.yt-formatted-string",
+        "selector": "a#video-title, a.ytLockupMetadataViewModelTitle > span.ytAttributedStringHost",
         "attr": "text",
         "pattern": "\\S{2,}",
         "min": 5,

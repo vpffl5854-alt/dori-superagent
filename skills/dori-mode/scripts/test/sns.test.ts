@@ -55,6 +55,7 @@ test("the error log becomes one repair per platform field, garbage lines skipped
 
 test("targets and profile URLs", () => {
   expect(parseTarget("youtube:@YouTube")).toEqual({ platform: "youtube", handle: "YouTube" });
+  expect(parseTarget("youtube-search:돈 버는 법")).toEqual({ platform: "youtube-search", handle: "돈 버는 법" });
   expect(parseTarget("nonsense")).toBeNull();
   expect(profileUrl({ url: "https://www.threads.com/@{handle}", fields: {} }, "@zuck")).toBe(
     "https://www.threads.com/@zuck",
