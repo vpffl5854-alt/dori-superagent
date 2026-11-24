@@ -1,0 +1,173 @@
+#!/bin/bash
+# 슈퍼도리 한 방 — Herdr 앱의 `슈퍼도리` space 를 지금 상태(판 4개)로 되살리고 앱에서 연다.
+#
+# 이 스페이스는 카톡·인스타와 완전히 분리돼 있다:
+#   코드 ~/dori-superagent · 홈 ~/.dori-superagent · 토큰 ~/.dori-superagent/secrets
+#   런타임 hc (Herdr 앱의 core) · 세션 omomeow 는 건드리지 않는다.
+#
+# 재부팅하면 Herdr 는 터미널을 살리되 원래 명령은 다시 돌리지 않는다(앱 문서: "its original
+# command is never run again"). 그래서 판은 빈 셸로 남고, 이 런처가 각 판을 다시 채운다.
+#
+# 판 구성 (2026-11-15 확정):
+#   리드        omo + prompts/lead.md
+#   duty        omo + prompts/duty.md
+#   duty-loop   dori duty --interval 60
+#   hourly-loop dori loop
+set -u
+
+APP="$HOME/.local/bin/herdr-app"
+HC="$HOME/.local/bin/hc"
+SPACE="슈퍼도리"
+WS="$HOME/.dori-superagent/workspace"
+REPO="$HOME/dori-superagent"
+HOME_DIR="$HOME/.dori-superagent"
+OMO_BIN="$(ls -d "$HOME"/.omo/binary-runtime/*/omo 2>/dev/null | sort -V | tail -1)"
+# 지시·검수·중간 확인은 오퍼스, 대화 레인은 플래시, 코드 레인은 오퍼스(중요한 것만).
+# 규칙 정본: prompts/lead.md 의 "모델 규칙".
+MODEL="${SUPERDORI_MODEL:-oc-hyeon/deepseek-v4.1-flash-free}"
+LEAD_MODEL="${SUPERDORI_LEAD_MODEL:-oc-hyeon/deepseek-v4.1-flash-free}"
+
+say() { printf '%s\n' "$*"; }
+
+# OmO 업데이트로 새 런타임이 풀리면 입력창 키 먹힘 수정(senpi PR #3046)을 다시 넣는다. 이미 있으면 아무것도 안 한다.
+"$HOME/.dori-superagent/bin/omo-stdin-guard" >/dev/null 2>&1 || true
+
+[ -x "$APP" ] || { say "herdr-app 이 없어: $APP" >&2; exit 1; }
+[ -x "$HC" ] || { say "hc 가 없어: $HC" >&2; exit 1; }
+[ -n "$OMO_BIN" ] && [ -x "$OMO_BIN" ] || { say "OmO 런타임을 못 찾았어 (~/.omo/binary-runtime/*/omo)" >&2; exit 1; }
+
+# 앱이 꺼져 있으면 연다. 앱은 core 를 직접 띄우므로 그 뒤에는 hc 가 바로 응답한다.
+if ! "$APP" status >/dev/null 2>&1; then
+  say "Herdr 앱을 열게."
+  open -a Herdr
+  i=0
+  while [ "$i" -lt 100 ]; do
+    "$APP" status >/dev/null 2>&1 && break
+    sleep 0.2
+    i=$((i + 1))
+  done
+fi
+
+# 앱의 space/tab/terminal 목록에서 값을 뽑는다. 인자: space 이름, tab 이름(없으면 space 의 첫 탭)
+pick() {
+  "$APP" ls 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => { raw += c; });
+    process.stdin.on("end", () => {
+      let spaces = [];
+      try { spaces = JSON.parse(raw).spaces ?? []; } catch { process.exit(0); }
+      const space = spaces.find((s) => s.name === process.argv[1] || s.id === process.argv[1]);
+      if (!space) process.exit(0);
+      const want = process.argv[2];
+      const tab = want ? (space.tabs ?? []).find((t) => t.name === want) : (space.tabs ?? [])[0];
+      if (!tab) process.exit(0);
+      const term = (tab.terminals ?? [])[0];
+      const field = process.argv[3];
+      if (field === "space") process.stdout.write(space.id);
+      else if (field === "tab") process.stdout.write(tab.id);
+      else if (term) process.stdout.write(term.terminal);
+    });
+  ' "$1" "$2" "$3"
+}
+
+space_id=$(pick "$SPACE" "" space)
+if [ -z "$space_id" ]; then
+  say "${SPACE} space 를 만들게."
+  "$APP" do space.new --name "$SPACE" --folder "$WS" >/dev/null 2>&1 || true
+  space_id=$(pick "$SPACE" "" space)
+fi
+[ -n "$space_id" ] || { say "${SPACE} space 를 못 찾았어." >&2; exit 1; }
+
+# 탭이 없으면 만든다. 있으면 그 터미널 주소를 돌려준다.
+ensure_tab() {
+  local name="$1" term
+  term=$(pick "$space_id" "$name" term)
+  if [ -z "$term" ]; then
+    "$APP" do tab.new --space "$space_id" --name "$name" --folder "$WS" >/dev/null 2>&1 || true
+    sleep 0.3
+    term=$(pick "$space_id" "$name" term)
+  fi
+  printf '%s' "$term"
+}
+
+fg_name() {
+  "$HC" get "$1" 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => { raw += c; });
+    process.stdin.on("end", () => {
+      try { process.stdout.write(String(JSON.parse(raw).foreground?.name ?? "")); } catch {}
+    });
+  '
+}
+
+wait_fg() {
+  local term="$1" want="$2" i=0
+  while [ "$i" -lt 100 ]; do
+    [ "$(fg_name "$term")" = "$want" ] && return 0
+    sleep 0.3
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# 판에 omo 를 띄운다. 이미 omo 면 아무것도 하지 않는다.
+start_omo() {
+  local term="$1" prompt="$2" extra="$3" model="${4:-$MODEL}"
+  [ "$(fg_name "$term")" = "omo" ] && return 0
+  say "${term} 에 OmO 를 띄울게."
+  # HC_TERMINAL_ID 를 지운다 — 이 런처를 omo 판 안에서 돌리면 hc 가 보내는 글에
+  # `<hc from="t20">…</hc>` 래퍼를 붙여 셸이 `parse error near '\n'` 으로 죽는다(2026-11-20 실측).
+  env -u HC_TERMINAL_ID -u HC_SCOPE "$HC" send "$term" "cd $WS && DORI_HOME=\$HOME/.dori-superagent $OMO_BIN --model $model $extra" >/dev/null 2>&1 || true
+  wait_fg "$term" omo || say "${term} 에서 OmO 가 안 떴어." >&2
+  if [ -n "$prompt" ]; then
+    env -u HC_TERMINAL_ID -u HC_SCOPE "$HC" send "$term" "Read $REPO/prompts/$prompt and follow it as your operating instructions. Do not run 'dori up', 'dori duty' or 'dori loop' yourself — the human starts those; if a lane is needed, run only 'dori start'. Reply with one short line confirming you are up." >/dev/null 2>&1 || true
+  fi
+}
+
+# 판에 셸 명령을 띄운다. 이미 그 명령이 foreground 면 건너뛴다.
+start_cmd() {
+  local term="$1" cmd="$2" marker="$3"
+  local cur
+  cur=$("$HC" get "$term" 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => { raw += c; });
+    process.stdin.on("end", () => {
+      try { process.stdout.write((JSON.parse(raw).foreground?.argv ?? []).join(" ")); } catch {}
+    });
+  ')
+  case "$cur" in *"$marker"*) return 0 ;; esac
+  say "${term} 에 ${marker} 를 띄울게."
+  env -u HC_TERMINAL_ID -u HC_SCOPE "$HC" send "$term" "$cmd" >/dev/null 2>&1 || true
+}
+
+lead=$(ensure_tab "리드")
+duty=$(ensure_tab "duty")
+duty_loop=$(ensure_tab "duty-loop")
+hourly=$(ensure_tab "hourly-loop")
+
+[ -n "$lead" ] || { say "리드 탭의 터미널을 못 찾았어." >&2; exit 1; }
+
+start_omo "$lead" "lead.md" "" "$LEAD_MODEL"
+start_omo "$duty" "duty.md" ""
+start_cmd "$duty_loop" "cd $REPO && DORI_HOME=\$HOME/.dori-superagent DORI_RUNTIME=hc $HOME/.bun/bin/bun src/cli.ts duty --interval 60" "duty --interval"
+start_cmd "$hourly" "cd $REPO && DORI_HOME=\$HOME/.dori-superagent DORI_RUNTIME=hc $HOME/.bun/bin/bun src/cli.ts loop" "cli.ts loop"
+
+# 재부팅 뒤 빈 셸만 남은 열린 레인(ready·working)을 그 레인 세션으로 다시 띄운다(대화 유지).
+"$REPO/ops/lane-revive/lane-revive" >> "$HOME_DIR/logs/lane-revive.log" 2>&1 || true
+
+# 역할 등록을 지금 판 주소로 맞춘다. 판 주소는 재부팅으로 바뀔 수 있다.
+node -e '
+  const fs = require("node:fs");
+  const path = process.argv[1];
+  let roles = {};
+  try { roles = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
+  roles.lead = "hc:" + process.argv[2];
+  roles.duty = "hc:" + process.argv[3];
+  roles["duty-loop"] = "hc:" + process.argv[4];
+  roles["hourly-loop"] = "hc:" + process.argv[5];
+  fs.writeFileSync(path, JSON.stringify(roles, null, 2) + "\n");
+' "$HOME_DIR/roles.json" "$lead" "$duty" "$duty_loop" "$hourly"
+
+# 창을 앞으로 올리지 않는다. 이 런처는 5분마다 도는데, space.select 도 '보여주기'라서
+# 다른 space 를 보던 중이면 슈퍼도리로 화면을 끌어온다. 슈퍼도리 space 가 이미 있으면 아무것도 하지 않는다.
+say "${SPACE} space 를 열었어 (리드 $lead · duty $duty · duty-loop $duty_loop · hourly-loop $hourly)."

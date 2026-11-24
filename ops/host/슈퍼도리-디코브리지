@@ -1,0 +1,52 @@
+#!/bin/bash
+# 디코 수신 로그를 따라가며 새 INBOUND 줄을 리드 판에 넣는다.
+#
+# 이 스페이스 전용이다. 카톡·인스타 쪽 브리지(`~/kakao-nyang/bin/dori-discord-bridge-insta.mjs`)와
+# 코드를 공유하지 않는다 — 그쪽은 herdr 세션 판에 넣고, 이쪽은 hc 터미널에 넣는다.
+#
+# 수신기(launchd `com.dori.superagent-discord`)가 남기는 로그 꼬리를 따라가므로, 수신기가
+# 재기동해도 이 루프는 그대로 돈다.
+set -u
+
+LOG="${SUPERDORI_INBOUND_LOG:-$HOME/.dori-superagent/logs/discord-inbound.log}"
+STATE="${SUPERDORI_BRIDGE_STATE:-$HOME/.dori-superagent/state/bridge-offset}"
+POLL="${SUPERDORI_BRIDGE_POLL:-2}"
+
+mkdir -p "$(dirname "$STATE")"
+[ -f "$STATE" ] || printf '0\n' > "$STATE"
+
+
+# 글 하나를 리드에 넘긴다. 입력창에 직접 붙이지 않고 도리의 받은편지함(`dori send lead`)을 쓴다: 리드가 쉬면 바로 넣고
+# Enter 가 먹었는지 확인하며, 일하는 중이면 쌓아 뒀다가 duty 루프가 쉴 때 한 번에 넣는다. 예전엔 `hc send` 로 바로
+# 붙였는데, 일하는 리드의 입력창에 글이 쌓이고 Enter 가 씹혀 49분 동안 한 건도 안 들어갔다(2026-11-24 실측).
+# 결과(DELIVERED/QUEUED/HELD)는 logs/superagent-bridge.log 에 남는다. HELD 는 다시 보내지 않는다(중복 방지).
+# 리포 원본으로 돈다(duty 루프와 같은 코드). 번들 bin/dori.js 는 11-21 빌드라 그 뒤 고친 전달 코드가 없다.
+DORI=("$HOME/.bun/bin/bun" "$HOME/dori-superagent/src/cli.ts")
+BRIDGE_LOG="$HOME/.dori-superagent/logs/superagent-bridge.log"
+send_line() {
+  local line="$1" id out
+  id=$(printf '%s' "$line" | awk '{print $6}')
+  out=$(printf '%s' "$line" | DORI_HOME="$HOME/.dori-superagent" DORI_RUNTIME=hc "${DORI[@]}" send lead 2>&1 | tail -1)
+  printf '[%s] %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$id" "$out" >> "$BRIDGE_LOG"
+}
+
+while :; do
+  if [ ! -f "$LOG" ]; then sleep "$POLL"; continue; fi
+
+  offset=$(cat "$STATE" 2>/dev/null || printf '0')
+  size=$(wc -c < "$LOG" | tr -d ' ')
+  # 로그가 잘렸거나 새로 열렸으면 처음부터.
+  [ "$size" -lt "$offset" ] && offset=0
+  if [ "$size" -gt "$offset" ]; then
+    chunk=$(tail -c +$((offset + 1)) "$LOG")
+    printf '%s' "$size" > "$STATE"
+    while IFS= read -r line; do
+      case "$line" in
+        # 잡담(route=chat)은 디코도리 판(discord-chat)이 답한다. 리드에는 일거리만 넣는다 (2026-11-24 지브).
+        INBOUND\ *route=chat:*) ;;
+        INBOUND\ *) send_line "$line" ;;
+      esac
+    done <<< "$chunk"
+  fi
+  sleep "$POLL"
+done

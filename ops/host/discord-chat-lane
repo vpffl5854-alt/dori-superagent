@@ -1,0 +1,124 @@
+#!/bin/bash
+# Opens the Discord chat lane at boot if it is not already open.
+#
+# The lane keeps its name (`discord-chat`) while its address (`hc:t42`) changes on every restart, so the lane is found
+# by name in the runtime's own list and only opened when that name is missing. `dori start` refuses a lane that is
+# already open, so a running lane is never disturbed.
+set -u
+HOME_DIR="${HOME}/.dori-superagent"
+export DORI_HOME="${HOME_DIR}"
+export PATH="${HOME}/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin"
+
+# Lane model schedule: zcode GLM until 2026-11-23 (Mon) 08:00 KST, then the config default (hive2 deepseek).
+# The switch is decided at launch time, so a lane opened inside the window runs zcode and one opened after runs the
+# default; a lane that stays open across the boundary keeps its opening model until the next rotation or restart.
+CUTOFF_EPOCH=1795388400   # 2026-11-23 08:00:00 KST
+ZCODE_MODEL="zcode-plan/GLM-5.3-Flash"
+if [ "$(date +%s)" -lt "$CUTOFF_EPOCH" ]; then
+  export DORI_LANE_MODEL="$ZCODE_MODEL"
+fi
+
+# The runtime points SSL_CERT_FILE at its own trust bundle, and on this machine that file is empty:
+# `/private/var/folders/.../omo-engine-trust-*/defaults/empty.pem` is 0 bytes, so every openssl-based tool in the lane
+# (curl, python urllib) fails the handshake with "certificate verify failed". Linked pages then look like a dead
+# network from inside the lane. CURL_CA_BUNDLE outranks SSL_CERT_FILE for curl and is not set by the runtime, so
+# pointing it at the system bundle restores HTTPS reads without touching the engine's own configuration.
+if [ -s /etc/ssl/cert.pem ]; then
+  export CURL_CA_BUNDLE="/etc/ssl/cert.pem"
+fi
+# Curl alone is not enough: the lane's agent reads links with python too, which follows SSL_CERT_FILE. The runtime
+# creates a fresh trust dir per session with an empty baseline, so the baseline is refilled before the lane starts.
+"${HOME_DIR}/bin/fix-engine-ca" >/dev/null 2>&1 || true
+
+log() { echo "[discord-chat-lane $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+# The room lane lives in the 슈퍼도리 space as the "디코도리" tab, so the person can see it. `dori start` opens a bare
+# terminal with no tab; this gives it one. Showing a space is how the app picks where a new tab goes, so the space the
+# person was looking at is shown again afterwards. Without the app (early at boot) it is left for the next run.
+APP="${HOME}/.local/bin/herdr-app"
+attach_tab() {
+  local addr="$1" where
+  where="$("$APP" ls 2>/dev/null | python3 -c '
+import json, sys
+try:
+    spaces = json.load(sys.stdin).get("spaces", [])
+except Exception:
+    print("noapp"); raise SystemExit(0)
+sp = next((s for s in spaces if s.get("name") == "슈퍼도리"), None)
+if sp is None:
+    print("nospace"); raise SystemExit(0)
+for t in sp.get("tabs", []):
+    if sys.argv[1] in [x.get("terminal") for x in t.get("terminals", [])]:
+        print("ok" if t.get("name") == "디코도리" else "rename " + t["id"]); raise SystemExit(0)
+print("attach " + sp["id"])
+' "$addr")"
+  case "$where" in
+    ok|noapp|nospace|"") return 0 ;;
+    rename\ *) "$APP" do tab.rename --id "${where#rename }" --name 디코도리 >/dev/null 2>&1 ;;
+    attach\ *)
+      local back tab
+      back="$("$APP" status 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("space",""), d.get("tab",""))' 2>/dev/null)"
+      "$APP" do terminal.park --terminal "$addr" >/dev/null 2>&1 || true
+      "$APP" do space.select --id "${where#attach }" >/dev/null 2>&1
+      tab="$("$APP" do terminal.keep --terminal "$addr" --place tab 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tab",""))' 2>/dev/null)"
+      [ -n "$tab" ] && "$APP" do tab.rename --id "$tab" --name 디코도리 >/dev/null 2>&1
+      hc keep "$addr" >/dev/null 2>&1 || true
+      if [ -n "${back% *}" ]; then
+        "$APP" do space.select --id "${back% *}" >/dev/null 2>&1
+        [ -n "${back#* }" ] && "$APP" do tab.select --id "${back#* }" >/dev/null 2>&1
+      fi
+      log "attached ${addr} to the 디코도리 tab" ;;
+  esac
+}
+live_addr() {
+  hc ls 2>/dev/null | python3 -c 'import json,sys; print(next((t["address"] for t in json.load(sys.stdin).get("terminals", []) if str(t.get("name","")).lower() == "discord-chat" and t.get("state") == "live"), ""))'
+}
+
+# The runtime's list is the truth about what is live; the lane record can be stale after a reboot.
+shell_addr="$(hc ls --all 2>/dev/null | python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin).get("terminals", [])
+except Exception:
+    raise SystemExit(0)
+for t in rows:
+    if t.get("state") == "live" and str(t.get("name", "")).lower() == "discord-chat":
+        # A kept terminal survives a reboot or a dead agent as a bare shell (hc names it after the command that opened
+        # it: zsh, or env for a lane): the name is live but no omo answers the room.
+        if str(t.get("agent", "")) != "omo":
+            print(t.get("address", ""))
+            raise SystemExit(2)
+        raise SystemExit(0)
+raise SystemExit(1)
+')"
+case $? in
+  0) attach_tab "$(live_addr)"; exit 0 ;;
+  2) log "discord-chat ${shell_addr} is only a shell (agent gone); closing it"
+     hc keep "$shell_addr" --off >/dev/null 2>&1 || true
+     hc kill "$shell_addr" >/dev/null 2>&1 || true
+     sleep 2
+     hc rm "$shell_addr" >/dev/null 2>&1 || true ;;
+esac
+
+log "opening discord-chat"
+cd "${HOME_DIR}" || exit 1
+# The lane record outlives its pane: a reboot leaves it "working" or "ready" while its old address is gone, and
+# `dori start` then refuses with "already open". A record whose pane is not live is marked lost in the store first, so
+# the name can be opened again.
+if ! ./bin/dori done discord-chat >>"${HOME_DIR}/logs/discord-chat-lane.log" 2>&1; then
+  python3 - "${HOME_DIR}/lanes/discord-chat.json" <<'PY'
+import json, sys, time
+path = sys.argv[1]
+try:
+    lane = json.load(open(path))
+except Exception:
+    raise SystemExit(0)
+lane["status"] = "lost"
+lane.setdefault("log", []).append({"at": int(time.time() * 1000), "kind": "lost", "text": "pane gone at boot"})
+json.dump(lane, open(path, "w"), ensure_ascii=False, indent=2)
+PY
+fi
+./bin/dori start discord-chat --brief "${HOME_DIR}/briefs/discord-chat.md" 2>&1 | tee -a "${HOME_DIR}/logs/discord-chat-lane.log"
+log "exit code=${PIPESTATUS[0]}"
+sleep 3
+attach_tab "$(live_addr)"

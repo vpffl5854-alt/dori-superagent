@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/jib</string>
+		<key>PATH</key>
+		<string>/Users/jib/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/jib/.local/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.dori.discord-chat-lane</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/jib/.dori-superagent/bin/discord-chat-lane</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/jib/.dori-superagent/logs/discord-chat-lane.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/jib/.dori-superagent/logs/discord-chat-lane.log</string>
+	<key>StartInterval</key>
+	<integer>300</integer>
+</dict>
+</plist>
