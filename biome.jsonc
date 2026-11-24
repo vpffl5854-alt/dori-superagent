@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/fixtures", "!**/*.md", "!docs/**/*.svg"]
+    "includes": ["**", "!**/fixtures", "!**/*.md", "!docs/**/*.svg", "!ops/omo-stdin-guard/worker-stdin-guard.js"]
   },
   "formatter": {
     "enabled": true,

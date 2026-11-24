@@ -1,0 +1,27 @@
+#!/bin/bash
+# OmO 의 JS eval 셀이 터미널 입력(/dev/stdin, fd 0)을 읽다 멈추면, 버려진 읽기가 채팅 입력창의 키를 계속 먹어서
+# 리드 입력이 죽는다(Enter 씹힘, 글 쌓임). 업스트림 수정 code-yeongyu/senpi PR #3046 을 설치본에 그대로 넣는다.
+# OmO 업데이트는 새 binary-runtime 폴더를 풀어 놓으므로, 아직 안 들어간 폴더에만 넣는다. 이미 들어간 폴더나
+# 업스트림이 직접 고친 버전(worker-stdin-guard.js 가 이미 있음)은 건드리지 않는다. 2026-11-24 실측 재현·검증.
+set -u
+SRC="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/worker-stdin-guard.js"
+for J in "$HOME"/.omo/binary-runtime/*/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js; do
+  R="$J/worker-runtime.js"
+  [ -f "$R" ] || continue
+  [ -f "$J/worker-stdin-guard.js" ] && continue
+  grep -q 'import { installShellCapture } from "./worker-shell-capture.js";' "$R" || { echo "omo-stdin-guard: $R 모양이 달라 건너뜀" >&2; continue; }
+  grep -q 'globalThis.__senpi_restore_console__ = () => {' "$R" || { echo "omo-stdin-guard: $R 모양이 달라 건너뜀" >&2; continue; }
+  cp "$R" "$R.orig-before-stdin-guard"
+  cp "$SRC" "$J/worker-stdin-guard.js"
+  python3 - "$R" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+a = 'import { installShellCapture } from "./worker-shell-capture.js";\n'
+b = 'globalThis.__senpi_restore_console__ = () => {\n'
+s = s.replace(a, a + 'import { installStdinGuard } from "./worker-stdin-guard.js";\n', 1)
+i = s.index(b); ls = s.rfind('\n', 0, i) + 1; ind = s[ls:i]
+s = s[:ls] + ind + 'const restoreStdinGuard = installStdinGuard();\n' + s[ls:i] + b + ind + '\trestoreStdinGuard();\n' + s[i + len(b):]
+open(p, 'w').write(s)
+PY
+  echo "omo-stdin-guard: patched $J"
+done
