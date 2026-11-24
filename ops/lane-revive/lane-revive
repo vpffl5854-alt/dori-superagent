@@ -1,0 +1,42 @@
+#!/bin/bash
+# 재부팅하면 hc 는 레인 판을 빈 셸로만 살린다(원래 명령은 다시 안 돈다). 그러면 아직 열린 레인(ready·working)이
+# 화면엔 있는데 아무도 없는 판이 된다. 이 스크립트는 그런 판에 레인의 omo 를 **그 레인의 세션 파일로** 다시 띄워
+# 대화를 잇는다. 원래 브리프 문장으로 다시 띄우면 일을 처음부터 다시 하므로 쓰지 않는다.
+# 대화 레인(chatLanes, 디코도리)은 bin/discord-chat-lane 이 따로 맡는다. 슈퍼도리 런처가 5분마다 부른다.
+set -u
+HOME_DIR="${DORI_HOME:-$HOME/.dori-superagent}"
+OMO="$(ls -d "$HOME"/.omo/binary-runtime/*/omo 2>/dev/null | sort -V | tail -1)"
+[ -x "$OMO" ] || exit 0
+python3 - "$HOME_DIR" "$OMO" <<'PY'
+import glob, json, os, re, shlex, subprocess, sys
+home, omo = sys.argv[1], sys.argv[2]
+cfg = json.load(open(os.path.join(home, "config.json")))
+chat = set(cfg.get("chatLanes", []))
+model = os.environ.get("DORI_LANE_MODEL") or cfg.get("defaultModel")
+sessions = os.path.expanduser(cfg.get("sessionsDir", "~/.omo/agent/sessions"))
+def hc(*a):
+    r = subprocess.run(["hc", *a], capture_output=True, text=True)
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip().startswith("{") else None
+def session_file(key, cwd):
+    d = os.path.join(sessions, "--" + cwd.strip("/").replace("/", "-") + "--")
+    pat = f"Your lane key is {key}."
+    for f in sorted(glob.glob(os.path.join(d, "*.jsonl")), key=os.path.getmtime, reverse=True):
+        with open(f, errors="ignore") as fh:
+            if pat in fh.read(400_000): return f
+    return None
+for path in sorted(glob.glob(os.path.join(home, "lanes", "*.json"))):
+    try: lane = json.load(open(path))
+    except Exception: continue
+    key, status, ref = lane.get("key"), lane.get("status"), lane.get("sessionRef") or {}
+    if key in chat or status not in ("ready", "working") or ref.get("runtime") != "hc": continue
+    t = hc("get", ref.get("id", ""))
+    if not t or t.get("state") != "live": continue
+    if (t.get("foreground") or {}).get("name") == "omo": continue
+    f = session_file(key, lane.get("cwd", ""))
+    if not f:
+        print(f"LANE_REVIVE_SKIP {key} {ref['id']}: no session file"); continue
+    cmd = f"cd {shlex.quote(lane['cwd'])} && " + shlex.join([omo] + (["--model", model] if model else []) + ["--session", f])
+    env = {k: v for k, v in os.environ.items() if k not in ("HC_TERMINAL_ID", "HC_SCOPE")}
+    subprocess.run(["hc", "send", ref["id"], cmd], capture_output=True, env=env)
+    print(f"LANE_REVIVED {key} {ref['id']} {os.path.basename(f)}")
+PY
