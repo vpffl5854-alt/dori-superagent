@@ -1,0 +1,8 @@
+#!/bin/bash
+# 매달 1일: 지난달 모델 비용 보고서를 만들어 지브 텔레그램(Dori 방)으로 보낸다. launchd com.dori.cost-monthly
+set -u
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin"
+out=$(dori-skill cost --month prev --write) || { echo "cost failed: $out"; exit 1; }
+file=${out#COST_REPORT }
+month=$(basename "$file" .md); month=${month#cost-}
+agent-telegrambot --bot superdofi_bot message upload 7673226638 "$file" --caption "월간 모델 비용 보고서 $month (모델별 호출·실패·성공률·추천)"

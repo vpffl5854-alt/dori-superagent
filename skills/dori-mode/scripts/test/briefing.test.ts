@@ -59,3 +59,18 @@ test("a plain-Korean rewrite is used only when every link, amount and count surv
   expect(keepsFacts(raw, "[쇼츠] 1건\n- 영상 하나 올림\n[이번 달 비용] 약 211달러")).toBe(false);
   expect(keepsFacts(raw, "")).toBe(false);
 });
+
+test("alerts that could wait show up in their own section", () => {
+  const text = renderBriefing({
+    now,
+    finished: [],
+    working: [],
+    lost: [],
+    faults: [],
+    shorts: [],
+    approvals: [],
+    alerts: ["SNS: 유튜브 셀렉터를 자동으로 고침"],
+  });
+  expect(text).toContain("[알림] 1건\n- SNS: 유튜브 셀렉터를 자동으로 고침");
+  expect(text).not.toContain("밤사이 새로 생긴 일 없음");
+});

@@ -12,6 +12,7 @@ import { upstreamCommands } from "./cli-upstream.ts";
 import { briefingCommands } from "./cli-briefing.ts";
 import { dorichatCommands } from "./cli-dorichat.ts";
 import { decisionsCommands } from "./cli-decisions.ts";
+import { notifyCommands } from "./cli-notify.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
 import { snsCommands } from "./cli-sns.ts";
@@ -77,6 +78,7 @@ const USAGE = `dori <command> [options]
   bounty [--report]                    paying GitHub issues (Algora) a Mac lane could win; --report tells owner + backlog
   decide --text T [--source S]         add a standing decision of the owner's to the ledger every pane reads
   decisions                            print the decision ledger
+  notify --level now|later --text T    an alert: now = 도리방 at once, later = in the next morning briefing
   dorichat                             도리방 listener: approval button presses and the owner's text -> lead inbox
   briefing [--no-send]                 morning briefing (finished/working/lost lanes, faults, shorts, approvals, cost) to Telegram
   upstream [--report] | apply <branch>  merge the original repo in a throwaway worktree + CI; apply fast-forwards live after a yes
@@ -137,6 +139,7 @@ const flags = parseArgs({
     auto: { type: "boolean" },
     heal: { type: "boolean" },
     report: { type: "boolean" },
+    level: { type: "string" },
   },
 });
 
@@ -155,6 +158,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...briefingCommands,
   ...dorichatCommands,
   ...decisionsCommands,
+  ...notifyCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

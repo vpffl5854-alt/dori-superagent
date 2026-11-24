@@ -13,6 +13,8 @@ export type Briefing = {
   readonly faults: readonly string[];
   readonly shorts: readonly string[];
   readonly approvals: readonly string[];
+  /** Alerts that could wait (`dori notify --level later`), since the last briefing. */
+  readonly alerts?: readonly string[];
   readonly cost?: { readonly month: string; readonly total: number; readonly calls: number; readonly unknown: number };
   readonly weather?: string;
 };
@@ -55,6 +57,7 @@ export const renderBriefing = (b: Briefing): string => {
     ...section("문제", b.faults),
     ...section("쇼츠", b.shorts),
     ...section("승인 기다리는 것", b.approvals),
+    ...section("알림", b.alerts ?? []),
   ];
   const cost = b.cost
     ? `[이번 달 비용] $${b.cost.total.toFixed(2)} (호출 ${b.cost.calls.toLocaleString("en-US")}건${b.cost.unknown > 0 ? `, 비용 모름 ${b.cost.unknown.toLocaleString("en-US")}건` : ""})`

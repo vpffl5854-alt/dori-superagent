@@ -12,6 +12,7 @@ import {
 } from "./briefing.ts";
 import type { Command } from "./cli-context.ts";
 import { sendApprovals } from "./cli-dorichat.ts";
+import { clearQueue, readQueue } from "./cli-notify.ts";
 import { sessionCalls } from "./cli-route.ts";
 import { fill } from "./config.ts";
 import { run } from "./run.ts";
@@ -152,6 +153,7 @@ const briefing: Command = async ({ values, config }) => {
     ...lanes(home, since, chat),
     faults: faults(config.stateDir, join(home, "logs"), since),
     shorts: shorts(config.stateDir, since),
+    alerts: readQueue(config).map((q) => `${q.source}: ${q.text}`),
     approvals: open.map((o) => (o.decision ? `${o.title}: ${o.decision}` : o.title)),
     ...(() => {
       const c = monthCost(config.sessionsDir, now);
@@ -179,6 +181,7 @@ const briefing: Command = async ({ values, config }) => {
   mkdirSync(config.stateDir, { recursive: true });
   writeFileSync(statePath, JSON.stringify({ at: now.toISOString() }));
   console.log("BRIEFING_SENT");
+  clearQueue(config);
   const buttons = await sendApprovals(
     config,
     open.map((o) => ({ id: o.id, label: buttonLabel(o) })),
