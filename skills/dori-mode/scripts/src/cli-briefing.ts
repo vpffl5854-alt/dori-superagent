@@ -1,6 +1,6 @@
 /** dori briefing [--no-send]: the morning briefing from Dori's own records, sent to the owner's Telegram. */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   type Briefing,
   keepsFacts,
@@ -11,6 +11,7 @@ import {
   sourceName,
 } from "./briefing.ts";
 import type { Command } from "./cli-context.ts";
+import { sendApprovals } from "./cli-dorichat.ts";
 import { sessionCalls } from "./cli-route.ts";
 import { fill } from "./config.ts";
 import { run } from "./run.ts";
@@ -110,11 +111,16 @@ const shorts = (state: string, since: number): string[] =>
     )
     .map((y) => `${y.meta?.title ?? "쇼츠"} ${y.url}`);
 
-const approvals = (home: string): string[] =>
-  files(join(home, "backlog"), ".json")
-    .map((p) => readJson<{ status?: string; title?: string; decision?: string }>(p))
-    .filter((b) => b?.status === "open")
-    .map((b) => (b?.decision ? `${b.title}: ${b.decision}` : (b?.title ?? "")));
+type Open = { id: string; title: string; decision?: string };
+const openItems = (home: string): Open[] =>
+  files(join(home, "backlog"), ".json").flatMap((p) => {
+    const b = readJson<{ status?: string; title?: string; decision?: string }>(p);
+    return b?.status === "open"
+      ? [{ id: basename(p, ".json"), title: b.title ?? "", ...(b.decision ? { decision: b.decision } : {}) }]
+      : [];
+  });
+/** A button label: the issue number when the title has one ("#49082"), else the id. */
+const buttonLabel = (o: Open): string => /#\d+/.exec(o.title)?.[0] ?? o.id;
 
 const monthCost = (sessionsDir: string, now: Date) => {
   const month = now.toISOString().slice(0, 7);
@@ -135,6 +141,7 @@ const briefing: Command = async ({ values, config }) => {
   const lastAt = readJson<{ at?: string }>(statePath)?.at;
   const since = Math.max(Date.parse(lastAt ?? "") || 0, now.getTime() - MAX_WINDOW_MS);
   const chat = (config as { chatLanes?: readonly string[] }).chatLanes ?? [];
+  const open = openItems(home);
   let weather: string | undefined;
   if (cfg.weatherArgv?.length) {
     const r = await run([...cfg.weatherArgv], { timeoutMs: 60_000 });
@@ -145,7 +152,7 @@ const briefing: Command = async ({ values, config }) => {
     ...lanes(home, since, chat),
     faults: faults(config.stateDir, join(home, "logs"), since),
     shorts: shorts(config.stateDir, since),
-    approvals: approvals(home),
+    approvals: open.map((o) => (o.decision ? `${o.title}: ${o.decision}` : o.title)),
     ...(() => {
       const c = monthCost(config.sessionsDir, now);
       return c ? { cost: c } : {};
@@ -172,6 +179,14 @@ const briefing: Command = async ({ values, config }) => {
   mkdirSync(config.stateDir, { recursive: true });
   writeFileSync(statePath, JSON.stringify({ at: now.toISOString() }));
   console.log("BRIEFING_SENT");
+  const buttons = await sendApprovals(
+    config,
+    open.map((o) => ({ id: o.id, label: buttonLabel(o) })),
+  ).catch((e) => {
+    console.log(`BRIEFING_BUTTONS_FAILED ${String(e).slice(0, 200)}`);
+    return false;
+  });
+  if (buttons) console.log(`BRIEFING_BUTTONS ${open.length}`);
 };
 
 export const briefingCommands: Readonly<Record<string, Command>> = { briefing };
