@@ -1,0 +1,44 @@
+#!/bin/bash
+# 슈퍼도리 백업: Mac 에만 있는 것(설정·결정 장부·계획서·할 일·레인 기록·인수인계서·자동 실행 설정)을 비공개 저장소
+# vpffl5854-alt/dori-backup 으로 올린다. 비밀 값(토큰 파일, secrets 폴더)은 넣지 않고, 올리기 전에 내용에 토큰 모양이
+# 섞였는지 검사해 하나라도 있으면 올리지 않는다. launchd com.dori.backup 이 매일 03:30 에 부른다. 바뀐 게 없으면 커밋 없음.
+set -u
+HOME_DIR="$HOME/.dori-superagent"
+DEST="${DORI_BACKUP_DIR:-$HOME/.dori-backup}"
+REMOTE="https://github.com/vpffl5854-alt/dori-backup.git"
+log() { echo "[dori-backup $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+if [ ! -d "$DEST/.git" ]; then
+  mkdir -p "$DEST" && git -C "$DEST" init -q -b main && git -C "$DEST" remote add origin "$REMOTE"
+fi
+# 지운 파일도 백업에서 지워지게, 매번 비우고 다시 채운다(.git 은 남긴다).
+find "$DEST" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+mkdir -p "$DEST/dori-home" "$DEST/LaunchAgents" "$DEST/repo-local"
+for f in config.json decisions.md roles.json; do [ -f "$HOME_DIR/$f" ] && cp "$HOME_DIR/$f" "$DEST/dori-home/"; done
+for d in briefs backlog lanes; do [ -d "$HOME_DIR/$d" ] && cp -R "$HOME_DIR/$d" "$DEST/dori-home/"; done
+cp ~/Library/LaunchAgents/com.dori.*.plist "$DEST/LaunchAgents/" 2>/dev/null
+[ -f "$HOME/dori-superagent/HANDOVER.md" ] && cp "$HOME/dori-superagent/HANDOVER.md" "$DEST/repo-local/"
+[ -f "$HOME/.local/bin/dori-skill" ] && cp -L "$HOME/.local/bin/dori-skill" "$DEST/repo-local/"
+cat > "$DEST/README.md" <<'MD'
+# 슈퍼도리 백업 (비공개)
+Mac 에만 있던 것. 비밀 값(토큰)은 없다 — 다시 발급해서 `~/.dori-superagent/secrets/` 에 넣는다.
+- `dori-home/` → `~/.dori-superagent/` (config.json, decisions.md, roles.json, briefs/, backlog/, lanes/)
+- `LaunchAgents/` → `~/Library/LaunchAgents/` (복구 뒤 `launchctl bootstrap gui/$(id -u) <plist>`)
+- `repo-local/HANDOVER.md` → `~/dori-superagent/HANDOVER.md`, `repo-local/dori-skill` → `~/.local/bin/dori-skill`
+코드는 vpffl5854-alt/dori-superagent (브랜치 discord-lane-answer).
+MD
+
+# 비밀 값 검사: 텔레그램·디스코드 봇 토큰, OpenAI·GitHub·Slack·Google 키 모양. 하나라도 나오면 올리지 않는다.
+hits=$(rg -n -l -e '\b[0-9]{8,10}:[A-Za-z0-9_-]{30,}\b' -e '\b[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b' \
+  -e '\bsk-[A-Za-z0-9_-]{20,}' -e '\bgh[pousr]_[A-Za-z0-9]{30,}' -e '\bxox[abpr]-[A-Za-z0-9-]{10,}' -e '\bAIza[0-9A-Za-z_-]{30,}' \
+  "$DEST" --glob '!.git' 2>/dev/null)
+if [ -n "$hits" ]; then
+  log "BACKUP_BLOCKED secret-looking text in: $(echo "$hits" | tr '\n' ' ')"
+  "$HOME/.local/bin/dori-skill" notify --level now --source 백업 --text "백업을 멈췄어요: 비밀 값처럼 보이는 글자가 섞여 있어요 ($(echo "$hits" | sed "s|$DEST/||" | tr '\n' ' '))" >/dev/null 2>&1
+  exit 1
+fi
+cd "$DEST" || exit 1
+git add -A
+if git diff --cached --quiet; then log "BACKUP_UNCHANGED"; exit 0; fi
+git -c user.name="dori-backup" -c user.email="dori-backup@localhost" commit -q -m "backup $(date '+%Y-%m-%d %H:%M')"
+if git push -q origin main 2>&1; then log "BACKUP_PUSHED $(git rev-parse --short HEAD)"; else log "BACKUP_PUSH_FAILED"; exit 1; fi
