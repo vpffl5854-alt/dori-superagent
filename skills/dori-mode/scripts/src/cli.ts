@@ -11,6 +11,7 @@ import { incidentsCommands } from "./cli-incidents.ts";
 import { upstreamCommands } from "./cli-upstream.ts";
 import { briefingCommands } from "./cli-briefing.ts";
 import { dorichatCommands } from "./cli-dorichat.ts";
+import { decisionsCommands } from "./cli-decisions.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
 import { snsCommands } from "./cli-sns.ts";
@@ -74,6 +75,8 @@ const USAGE = `dori <command> [options]
   sns scrape <platform> <handle> | run [--heal] | heal
                                        public YouTube/Instagram/Threads/TikTok profiles; heal rewrites a broken selector
   bounty [--report]                    paying GitHub issues (Algora) a Mac lane could win; --report tells owner + backlog
+  decide --text T [--source S]         add a standing decision of the owner's to the ledger every pane reads
+  decisions                            print the decision ledger
   dorichat                             도리방 listener: approval button presses and the owner's text -> lead inbox
   briefing [--no-send]                 morning briefing (finished/working/lost lanes, faults, shorts, approvals, cost) to Telegram
   upstream [--report] | apply <branch>  merge the original repo in a throwaway worktree + CI; apply fast-forwards live after a yes
@@ -151,6 +154,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...upstreamCommands,
   ...briefingCommands,
   ...dorichatCommands,
+  ...decisionsCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
+import { appendDecision } from "./cli-decisions.ts";
 import type { DoriConfig } from "./config.ts";
 import {
   type Approval,
@@ -12,6 +13,7 @@ import {
   type Press,
   pressAnswer,
 } from "./dorichat.ts";
+import { rememberText } from "./decisions.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { Telegram } from "./messenger/telegram.ts";
 import { realClock, run } from "./run.ts";
@@ -117,6 +119,12 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
   const m = u.message;
   if (!m?.text || m.from?.id !== cfg.ownerId) return;
   if (m.text.trim() === "/start") return;
+  const remember = rememberText(m.text);
+  if (remember) {
+    appendDecision(config, remember, "도리방");
+    console.log("DORICHAT_DECIDED");
+    return void (await tg.send({ chatId: m.chat.id }, `기억했어요: ${remember}\n(모든 판이 일하기 전에 읽어요)`));
+  }
   const r = await run([...harnessOf(config), "send", "lead", "--text", forwardText(m.text, cfg.replyArgv ?? [])], {
     timeoutMs: 60_000,
   });
