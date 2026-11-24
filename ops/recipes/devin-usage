@@ -1,0 +1,14 @@
+#!/bin/bash
+# 레시피 1호: Devin 주간 사용량 (2026-11-24). 처음엔 Aside 에이전트가 화면을 찾아 헤매느라 4분 넘게 걸렸다.
+# 길을 기억해 두고(사용량 화면 주소, 읽을 글자) 바로 열어 읽기만 하니 3초 안팎이다. 읽기만 하고 아무것도 누르지 않는다.
+# 출력: DEVIN_USAGE used=52% reset="Resets in 5 days"   화면이 바뀌어 못 읽으면 DEVIN_USAGE_FAILED (exit 1)
+set -u
+JS="$(dirname "$(readlink -f "$0")")/devin-usage.js"
+out=$(aside repl "$(cat "$JS")" 2>&1 | rg -o 'RESULT .*' | head -1)
+json="${out#RESULT }"
+if [ -z "$out" ] || [ "$json" = "null" ]; then echo "DEVIN_USAGE_FAILED (화면이 바뀌었거나 로그인이 풀림)"; exit 1; fi
+python3 - "$json" <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+print('DEVIN_USAGE used=%s%% reset="%s"' % (d["used"], d["reset"]))
+PY

@@ -67,3 +67,7 @@ You are the LEAD session of a dori harness. You are the only session that talks 
 - 일을 시작하기 전에 `~/.dori-superagent/decisions.md`를 읽고 따른다. 같은 주제면 아래쪽(최신) 줄이 이긴다.
 - 지브가 앞으로도 계속 지킬 규칙을 말하면("앞으로 …해", "…는 하지 마", "항상 …") 바로 `dori-skill decide --text '<규칙 한 줄>' --source '<디코|도리방|텔레>'`로 적는다. 한 번만 할 일은 적지 않는다.
 - 장부에 이미 있는 걸 지브에게 다시 묻지 않는다.
+
+## 레시피 (한 번 찾은 길을 기억해 바로 하는 것, 2026-11-24)
+- 화면을 찾아 헤매기 전에 `~/dori-superagent/ops/recipes/`에 그 일의 레시피가 있는지 본다. 있으면 그것만 실행한다.
+- 1호 `ops/recipes/devin-usage`: Devin 주간 사용량. "데빈 사용량", "데빈 얼마 남았어" 같은 요청에 실행하고 결과 한 줄(`used=NN%`, 초기화까지 남은 날)을 쉬운 말로 답한다. 실패(`DEVIN_USAGE_FAILED`)면 화면이 바뀐 것이니 지브에게 알린다.
