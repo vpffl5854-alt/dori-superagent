@@ -42,8 +42,8 @@ const notify: Command = async ({ opt, config }) => {
     return void console.log("NOTIFY_QUEUED");
   }
   const bot = dorichatBot(config);
-  if (!bot?.cfg.chatId) die("no 도리방 bot (dorichat.tokenFile / chatId)");
-  await bot.tg.send({ chatId: bot.cfg.chatId }, `[${source}] ${text}`);
+  const chatId = bot?.cfg.chatId ?? die("no 도리방 bot (dorichat.tokenFile / chatId)");
+  await bot?.tg.send({ chatId }, `[${source}] ${text}`);
   console.log("NOTIFY_SENT");
 };
 
