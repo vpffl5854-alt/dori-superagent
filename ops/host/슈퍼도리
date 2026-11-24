@@ -152,7 +152,7 @@ start_omo "$duty" "duty.md" ""
 start_cmd "$duty_loop" "cd $REPO && DORI_HOME=\$HOME/.dori-superagent DORI_RUNTIME=hc $HOME/.bun/bin/bun src/cli.ts duty --interval 60" "duty --interval"
 start_cmd "$hourly" "cd $REPO && DORI_HOME=\$HOME/.dori-superagent DORI_RUNTIME=hc $HOME/.bun/bin/bun src/cli.ts loop" "cli.ts loop"
 
-# 재부팅 뒤 빈 셸만 남은 열린 레인(ready·working)을 그 레인 세션으로 다시 띄운다(대화 유지).
+# 재부팅 뒤 빈 셸만 남은 일하던 레인(working)을 그 레인 세션으로 다시 띄운다(대화 유지).
 "$REPO/ops/lane-revive/lane-revive" >> "$HOME_DIR/logs/lane-revive.log" 2>&1 || true
 
 # 역할 등록을 지금 판 주소로 맞춘다. 판 주소는 재부팅으로 바뀔 수 있다.
