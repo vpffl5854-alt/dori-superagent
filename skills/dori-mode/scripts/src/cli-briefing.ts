@@ -164,9 +164,22 @@ const briefing: Command = async ({ values, config }) => {
   const raw = renderBriefing(b);
   let text = raw;
   if (cfg.omo) {
-    const r = await run([cfg.omo, "--model", cfg.model ?? config.defaultModel, "-p", plainPrompt(raw)], {
-      timeoutMs: 180_000,
-    });
+    const r = await run(
+      [
+        cfg.omo,
+        "--model",
+        cfg.model ?? config.defaultModel,
+        // Its own session folder: a session filed under DORI_HOME's cwd becomes "the newest log there", and the Discord
+        // room's answers are read from that newest log, so 디코도리's replies were read from this rewrite and dropped.
+        "--session-dir",
+        join(config.stateDir, "briefing-sessions"),
+        "-p",
+        plainPrompt(raw),
+      ],
+      {
+        timeoutMs: 180_000,
+      },
+    );
     const plain = r.out.trim();
     if (r.code === 0 && keepsFacts(raw, plain)) text = plain;
     else console.log(`BRIEFING_PLAIN_SKIPPED exit=${r.code}${r.code === 0 ? " (numbers or links changed)" : ""}`);

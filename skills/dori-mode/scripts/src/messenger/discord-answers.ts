@@ -176,7 +176,11 @@ export const startDiscordReplies = (
       if (item.ownFrom === undefined && status === "working") continue;
       const text = lastAnswer(item.sessionPath, item.ownFrom ?? item.offset);
       if (!text) {
-        if (working && status !== "working") return true;
+        if (working && status !== "working") {
+          // Dropped without a word before: the pane finished its turn but no answer was found where it was looked for.
+          note(stateDir, `no answer found for ${item.messageId} in ${item.sessionPath}`);
+          return true;
+        }
         continue;
       }
       // The same answer is never posted twice for one message: a retry after a failed post, or a second pass over the
