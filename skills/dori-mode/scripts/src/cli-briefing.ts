@@ -1,7 +1,15 @@
 /** dori briefing [--no-send]: the morning briefing from Dori's own records, sent to the owner's Telegram. */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type Briefing, type LaneFact, laneSummary, renderBriefing } from "./briefing.ts";
+import {
+  type Briefing,
+  keepsFacts,
+  type LaneFact,
+  laneSummary,
+  plainPrompt,
+  renderBriefing,
+  sourceName,
+} from "./briefing.ts";
 import type { Command } from "./cli-context.ts";
 import { sessionCalls } from "./cli-route.ts";
 import { fill } from "./config.ts";
@@ -10,6 +18,9 @@ import { run } from "./run.ts";
 export type BriefingConfig = {
   /** Sends the message (`{text}`); the SNS alert's argv when absent. */
   readonly notifyArgv?: readonly string[];
+  /** omo binary and model that rewrite the briefing in plain Korean; the plain version goes out when absent or failing. */
+  readonly omo?: string;
+  readonly model?: string;
   /** Prints one line of weather; the briefing says "미연결" when absent. */
   readonly weatherArgv?: readonly string[];
 };
@@ -64,7 +75,7 @@ const faults = (state: string, logs: string, since: number): string[] => {
   const grouped = new Map<string, number>();
   for (const [sig, v] of Object.entries(seen?.seen ?? {})) {
     if (Date.parse(v.lastAt ?? "") < since) continue;
-    const head = `${v.file ?? "로그"}: ${sig.slice(0, FAULT_HEAD)}`;
+    const head = `${sourceName(v.file ?? "로그")}: ${sig.slice(0, FAULT_HEAD)}`;
     grouped.set(head, (grouped.get(head) ?? 0) + (v.count ?? 1));
   }
   const out = [...grouped].map(([head, n]) => `${head} (${n}회)`);
@@ -76,10 +87,10 @@ const faults = (state: string, logs: string, since: number): string[] => {
   }
   if (broken.size > 0) out.push(`SNS 셀렉터 깨짐: ${[...broken].join(", ")}`);
   const shortsErr = join(logs, "shorts-daily.err.log");
-  const told = out.some((l) => l.startsWith("shorts-daily.err.log"));
+  const told = out.some((l) => l.startsWith(sourceName("shorts-daily.err.log")));
   if (!told && existsSync(shortsErr) && statSync(shortsErr).mtimeMs >= since) {
     const last = readFileSync(shortsErr, "utf8").trim().split("\n").at(-1);
-    if (last) out.push(`쇼츠: ${last}`);
+    if (last) out.push(`${sourceName("shorts-daily.err.log")}: ${last}`);
   }
   return out;
 };
@@ -141,9 +152,19 @@ const briefing: Command = async ({ values, config }) => {
     })(),
     ...(weather === undefined ? {} : { weather }),
   };
-  const text = renderBriefing(b);
-  console.log(text);
-  if (values["no-send"] === true) return;
+  const raw = renderBriefing(b);
+  let text = raw;
+  if (cfg.omo) {
+    const r = await run([cfg.omo, "--model", cfg.model ?? config.defaultModel, "-p", plainPrompt(raw)], {
+      timeoutMs: 180_000,
+    });
+    const plain = r.out.trim();
+    if (r.code === 0 && keepsFacts(raw, plain)) text = plain;
+    else console.log(`BRIEFING_PLAIN_SKIPPED exit=${r.code}${r.code === 0 ? " (numbers or links changed)" : ""}`);
+  }
+  // Only --no-send prints the text: the launchd log is scanned for faults, and a briefing quoting yesterday's errors
+  // would be read back as new ones.
+  if (values["no-send"] === true) return void console.log(text);
   const argv = cfg.notifyArgv ?? (config as { sns?: { notifyArgv?: readonly string[] } }).sns?.notifyArgv;
   if (!argv?.length) return void console.log("BRIEFING_NOT_SENT no briefing.notifyArgv");
   const r = await run(fill(argv, { text }), { timeoutMs: 60_000 });

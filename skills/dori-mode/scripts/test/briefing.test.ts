@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { laneSummary, renderBriefing, SECTION_MAX } from "../src/briefing.ts";
+import { keepsFacts, laneSummary, renderBriefing, SECTION_MAX, sourceName } from "../src/briefing.ts";
 
 const now = new Date("2026-11-24T23:00:00Z"); // 08:00 KST, Wednesday
 
@@ -41,4 +41,21 @@ test("a long section shows its first lines and counts the rest; long lines are c
 test("a lane summary is the first line of its answer without the READY word", () => {
   expect(laneSummary("READY 증거 검증 완료: 커밋 c79ba48\n\n- 세부")).toBe("증거 검증 완료: 커밋 c79ba48");
   expect(laneSummary(undefined)).toBe("");
+});
+
+test("a fault names the job in plain words, not the log file", () => {
+  expect(sourceName("shorts-daily.err.log")).toBe("쇼츠 자동 제작");
+  expect(sourceName("new-job.err.log")).toBe("new-job");
+});
+
+test("a plain-Korean rewrite is used only when every link, amount and count survived", () => {
+  const raw = "[쇼츠] 1건\n- 백색 잡음 https://youtube.com/shorts/x1\n[이번 달 비용] $211.48 (호출 49,618건)";
+  expect(
+    keepsFacts(
+      raw,
+      "[쇼츠] 1건\n- 백색 잡음 영상 https://youtube.com/shorts/x1\n[이번 달 비용] $211.48 (호출 49,618건)",
+    ),
+  ).toBe(true);
+  expect(keepsFacts(raw, "[쇼츠] 1건\n- 영상 하나 올림\n[이번 달 비용] 약 211달러")).toBe(false);
+  expect(keepsFacts(raw, "")).toBe(false);
 });

@@ -75,3 +75,39 @@ export const laneSummary = (text: string | undefined): string =>
     .map((l) => l.trim())
     .find((l) => l !== "")
     ?.replace(/^(?:READY|DONE)\b[:\s]*/i, "") ?? "";
+
+/** What each log is, in the owner's words: a briefing line names the job, not the file. */
+export const SOURCE_NAMES: Readonly<Record<string, string>> = {
+  "shorts-daily.err.log": "쇼츠 자동 제작",
+  "shorts-daily.log": "쇼츠 자동 제작",
+  "sns-heal.log": "SNS 수집",
+  "discord-inbound.err.log": "디코 수신",
+  "discord-inbound.log": "디코 수신",
+  "instinct-bridge-launchd.err.log": "인스팅트 연결",
+  "watchdog.err.log": "감시 작업",
+  "er.err.log": "의무실",
+  "lead-launcher.err.log": "리드 실행기",
+};
+export const sourceName = (file: string): string => SOURCE_NAMES[file] ?? file.replace(/\.(?:err\.)?log$/, "");
+
+export const plainPrompt = (text: string): string =>
+  [
+    "아래는 슈퍼도리(AI 비서)가 주인에게 보내는 아침 브리핑이다. 주인은 개발자가 아니다. 휴대폰으로 3초 안에 읽히게 쉬운 한국어로 다시 써라.",
+    "규칙:",
+    "- 사실을 더하거나 빼지 않는다. 링크(URL), 금액($), 건수(N건), 횟수는 글자 그대로 둔다.",
+    "- 커밋 번호, 파일 경로, 브랜치 이름, 영어 코드·로그 문장은 빼고 무슨 일인지만 짧은 우리말로 쓴다.",
+    "- 레인 이름(omh-port4 같은 것)은 앞에 그대로 두되, 뒤 설명은 한 줄 15~30자로 줄인다.",
+    "- [섹션] 제목 줄과 '- ' 목록 모양은 그대로 둔다. 인사말·맺음말·이모지는 넣지 않는다. 다시 쓴 브리핑만 출력한다.",
+    "예: '- omh-port4: 증거 실재 검증 완료: ready가 --evidence 값을 실제로 검사한다(커밋 c79ba48)' → '- omh-port4: 완료 보고 때 증거를 실제로 확인하게 고침'",
+    "예: '- 쇼츠 자동 제작: SHORTS_FAILED topics slot gave nothing (exit <n>) (1회)' → '- 쇼츠 자동 제작: 주제를 못 골라 실패 (1회)'",
+    "예: '- hunt-bun-49082: oven-sh/bun#49082' → '- hunt-bun-49082: bun 버그 고치기 후보 (oven-sh/bun#49082)'",
+    "",
+    text,
+  ].join("\n");
+
+/** The rewrite is used only when it kept every link and number of the original; otherwise the original goes out. */
+export const keepsFacts = (original: string, rewritten: string): boolean => {
+  if (rewritten.trim().length < 20) return false;
+  const facts = original.match(/https?:\/\/\S+|\$[\d.,]+|\d[\d,]*(?:\.\d+)?건/g) ?? [];
+  return facts.every((f) => rewritten.includes(f));
+};
