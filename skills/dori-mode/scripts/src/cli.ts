@@ -9,6 +9,7 @@ import { opsCommands } from "./cli-ops.ts";
 import { bountyCommands, huntCommands } from "./cli-hunt.ts";
 import { incidentsCommands } from "./cli-incidents.ts";
 import { upstreamCommands } from "./cli-upstream.ts";
+import { briefingCommands } from "./cli-briefing.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
 import { snsCommands } from "./cli-sns.ts";
@@ -72,6 +73,7 @@ const USAGE = `dori <command> [options]
   sns scrape <platform> <handle> | run [--heal] | heal
                                        public YouTube/Instagram/Threads/TikTok profiles; heal rewrites a broken selector
   bounty [--report]                    paying GitHub issues (Algora) a Mac lane could win; --report tells owner + backlog
+  briefing [--no-send]                 morning briefing (finished/working/lost lanes, faults, shorts, approvals, cost) to Telegram
   upstream [--report] | apply <branch>  merge the original repo in a throwaway worktree + CI; apply fast-forwards live after a yes
   incidents [--report]                 repeating faults in Dori's own logs; --report files issue + backlog + tells owner
   render-er <log-dir> [--rerun]        diagnose MoviePy/ffmpeg logs; --rerun runs only curable failed jobs via hooks.render
@@ -145,6 +147,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...incidentsCommands,
   ...bountyCommands,
   ...upstreamCommands,
+  ...briefingCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

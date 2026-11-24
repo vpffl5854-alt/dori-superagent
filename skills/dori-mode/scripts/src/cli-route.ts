@@ -60,7 +60,7 @@ const er: Command = async ({ loopMinutes, config, deps }) => {
 };
 
 /** Every session log under sessionsDir (one folder per working directory); an unreadable one is skipped. */
-const sessionCalls = (dir: string): Call[] => {
+export const sessionCalls = (dir: string): Call[] => {
   const out: Call[] = [];
   for (const entry of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     if (!entry.endsWith(".jsonl") || entry.includes("-artifacts")) continue;
