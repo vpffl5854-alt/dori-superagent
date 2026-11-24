@@ -61,6 +61,17 @@ export const sendApprovals = async (config: DoriConfig, items: readonly Approval
   return true;
 };
 
+const decidedPath = (config: DoriConfig): string => join(config.stateDir, "dorichat-decided.json");
+const readDecided = (config: DoriConfig): Record<string, string> => {
+  try {
+    return JSON.parse(readFileSync(decidedPath(config), "utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+const writeDecided = (config: DoriConfig, d: Record<string, string>): void =>
+  writeFileSync(decidedPath(config), JSON.stringify(d));
+
 const act = async (config: DoriConfig, p: Press): Promise<boolean> => {
   const h = harnessOf(config);
   const lead = leadText(p);
@@ -79,7 +90,15 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
       return void (await tg.call("answerCallbackQuery", { callback_query_id: cq.id, text: "주인만 누를 수 있어요" }));
     const p = parsePress(cq.data);
     if (!p) return void (await tg.call("answerCallbackQuery", { callback_query_id: cq.id }));
+    // A second tap can land before the buttons are gone: an item already decided is not acted on again.
+    const decided = readDecided(config);
+    if (decided[p.id])
+      return void (await tg.call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `${p.id}: 이미 처리했어요 (${decided[p.id]})`,
+      }));
     const ok = await act(config, p);
+    if (ok) writeDecided(config, { ...decided, [p.id]: p.action });
     await tg.call("answerCallbackQuery", { callback_query_id: cq.id, text: pressAnswer(p, ok) });
     console.log(`DORICHAT_PRESS ${p.action} ${p.id} ok=${ok}`);
     if (!ok || !cq.message) return;
