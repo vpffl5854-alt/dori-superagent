@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { approvalText, fieldShowing, focusedText, sendsField } from "../src/mac.ts";
+import { approvalText, fieldShowing, fieldValue, focusedText, sendsField } from "../src/mac.ts";
 import type { Engine, Reply } from "../src/mac-engine.ts";
 import { type GoalDeps, runGoal } from "../src/mac-goal.ts";
 import type { MacTask } from "../src/mac.ts";
@@ -122,4 +122,10 @@ test("with autoSend a delete is still held, and the owner's draft is still never
   );
   expect(draft.held).toBe(true);
   expect(sent).toEqual([]);
+});
+
+test("an empty Discord field shows only invisible characters: it counts as empty, a draft does not", () => {
+  expect(fieldValue('- textarea "#일반에 메시지 보내기" [ref=e2]: "\ufeff "', "e2")).toBe("");
+  expect(fieldValue('- textarea "#일반에 메시지 보내기" [ref=e2]: "\ufeff초안 "', "e2")).toBe("초안");
+  expect(fieldValue('- textarea "메모" [ref=e2]', "e2")).toBe("");
 });

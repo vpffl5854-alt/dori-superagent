@@ -168,11 +168,19 @@ export const approvalText = (id: string, t: MacTask, danger: readonly string[]):
   ].join("\n");
 
 const FIELD = /^\s*- (textarea|textfield|searchfield|combobox)\b/;
-const clean = (v: string): string => v.replace(/[\u200b\ufeff]/g, "").trim();
+const clean = (v: string): string =>
+  v
+    .replace(/\\n/g, " ")
+    .replace(/[\u200b\ufeff]/g, "")
+    .trim();
 
 /** With no focused field (Electron apps often mark none): the text of a field showing exactly one of these texts. */
 export const fieldShowing = (snapshot: string, texts: readonly string[]): string | undefined =>
   fieldTexts(snapshot).find((v) => texts.some((t) => t.trim() === v));
+
+/** What one control shows, with invisible characters and blank lines dropped ("" for an empty Discord field). */
+export const fieldValue = (snapshot: string, ref: string): string =>
+  clean(new RegExp(`\\[ref=${reEscape(ref)}\\][^\\n]*?: "(.*)"`).exec(snapshot)?.[1]?.replace(/\\n/g, " ") ?? "");
 
 /** The non-empty texts the snapshot's text fields show. */
 export const fieldTexts = (snapshot: string): string[] =>

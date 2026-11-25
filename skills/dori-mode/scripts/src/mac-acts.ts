@@ -7,6 +7,7 @@ import {
   dangerousSteps,
   fieldShowing,
   fieldTexts,
+  fieldValue,
   focusedText,
   sendOnly,
   sendsField,
@@ -90,7 +91,7 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
     const snap = tw && tw.id === c.shown?.id ? c.snapshot : "";
     const ref = findRef(snap, act.field);
     // The owner's own writing is never typed over: a field that already shows text is refused, whatever the model says.
-    const filled = ref ? new RegExp(`\\[ref=${ref}\\][^\\n]*: "[^"]+`).test(snap) : false;
+    const filled = ref ? Boolean(fieldValue(snap, ref)) : false;
     const r = ref && !filled ? await e.call("ax.typeText", { ref, text: act.text }) : undefined;
     const ok = Boolean(r && !r.error);
     const result = ok
