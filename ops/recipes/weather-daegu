@@ -1,0 +1,36 @@
+#!/bin/bash
+# 레시피: 대구 날씨 한 줄 (2026-11-25). 지브가 날씨 기본 지역을 대구로 정했다(decisions.md).
+# briefing.briefing.weatherArgv 가 이 스크립트를 부르고, 첫 줄만 브리핑 [날씨] 칸에 들어간다.
+set -u
+BASE="${KSKILL_PROXY_BASE_URL:-https://k-skill-proxy.nomadamas.org}"
+nx=89; ny=90
+now=$(curl -fsS --max-time 20 --get "$BASE/v1/korea-weather/now" --data-urlencode "nx=$nx" --data-urlencode "ny=$ny" 2>/dev/null)
+fc=$(curl -fsS --max-time 20 --get "$BASE/v1/korea-weather/forecast" --data-urlencode "nx=$nx" --data-urlencode "ny=$ny" 2>/dev/null)
+python3 - "$now" "$fc" <<'PY'
+import json, sys
+def items(raw):
+    try:
+        return json.loads(raw)["response"]["body"]["items"]["item"]
+    except Exception:
+        return []
+now = {i["category"]: i["obsrValue"] for i in items(sys.argv[1])}
+fc = items(sys.argv[2])
+tmp = [float(i["fcstValue"]) for i in fc if i["category"] == "TMP"]
+pop = [int(float(i["fcstValue"])) for i in fc if i["category"] == "POP"]
+pty = {i["fcstValue"] for i in fc if i["category"] == "PTY"}
+if not now:
+    print("대구 확인 못 함 (기상청 응답 없음)")
+    raise SystemExit(0)
+sky = {"0": "맑음", "1": "비", "2": "비/눈", "3": "눈", "5": "빗방울", "6": "진눈깨비", "7": "눈날림"}
+p = now.get("PTY", "0")
+cond = "강수 없음" if p == "0" else sky.get(p, f"강수형태 {p}")
+parts = [f"대구 {now.get('T1H','?')}도 {cond}", f"습도 {now.get('REH','?')}%", f"바람 {now.get('WSD','?')}m/s"]
+if pop:
+    parts.append(f"오늘 강수확률 최대 {max(pop)}%")
+    if any(x in pty for x in ("1", "2", "3", "5", "6", "7")):
+        parts.append("오늘 비/눈 예보")
+if tmp:
+    parts.append(f"기온 {min(tmp):.0f}~{max(tmp):.0f}도")
+print(", ".join(parts))
+PY
+
