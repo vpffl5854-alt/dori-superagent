@@ -12,6 +12,7 @@ import { upstreamCommands } from "./cli-upstream.ts";
 import { briefingCommands } from "./cli-briefing.ts";
 import { dorichatCommands } from "./cli-dorichat.ts";
 import { decisionsCommands } from "./cli-decisions.ts";
+import { macCommands } from "./cli-mac.ts";
 import { notifyCommands } from "./cli-notify.ts";
 import { routeCommands } from "./cli-route.ts";
 import { shortsCommands } from "./cli-shorts.ts";
@@ -79,6 +80,13 @@ const USAGE = `dori <command> [options]
   decide --text T [--source S]         add a standing decision of the owner's to the ledger every pane reads
   decisions                            print the decision ledger
   notify --level now|later --text T    an alert: now = 도리방 at once, later = in the next morning briefing
+  mac windows | look --app A          Mac windows, or one app's controls by name (OmO desktop engine, inside Herdr)
+  mac press --app A --steps "a,b|c" [--expect V] [--no-send]
+                                       press controls by name in the background, before/after photos to 도리방;
+                                       a pay/delete/send/post step waits for 진행 in 도리방; outside Herdr it queues for 맥손
+  mac recipe save <name> --app A --steps S [--expect V] | recipe run <name> | recipe list
+  mac stop | resume                    the stop switch (도리방 "멈춰" / "재개"); the chord ctrl+alt+shift+escape stops too
+  mac selftest [--report] | serve      6×7 on Calculator; serve is the 맥손 tab (queue + daily self-test)
   dorichat                             도리방 listener: approval button presses and the owner's text -> lead inbox
   briefing [--no-send]                 morning briefing (finished/working/lost lanes, faults, shorts, approvals, cost) to Telegram
   upstream [--report] | apply <branch>  merge the original repo in a throwaway worktree + CI; apply fast-forwards live after a yes
@@ -140,6 +148,9 @@ const flags = parseArgs({
     heal: { type: "boolean" },
     report: { type: "boolean" },
     level: { type: "string" },
+    app: { type: "string" },
+    steps: { type: "string" },
+    expect: { type: "string" },
   },
 });
 
@@ -159,6 +170,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...dorichatCommands,
   ...decisionsCommands,
   ...notifyCommands,
+  ...macCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

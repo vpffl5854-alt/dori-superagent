@@ -1,0 +1,88 @@
+#!/bin/bash
+# 맥손 판 — Herdr `슈퍼도리` space 의 `맥손` 탭에서 `dori-skill mac serve` 를 띄운다 (슈퍼도리 컴퓨터 유즈의 손).
+#
+# OmO 화면 엔진은 launchd 아래에서는 실행을 거부한다(권한을 가진 앱의 자식이어야 함). 그래서 Herdr 안의 이 탭이
+# 도리방 승인·큐·매일 자가 시험을 맡는다. 로그인 때와 5분마다(launchd com.dori.mac-hand) 탭이 비었으면 다시 넣는다.
+# 이미 bun(serve)이 떠 있으면 아무것도 하지 않는다. 구조는 ~/.local/bin/devin-herdr 를 따랐다.
+set -u
+
+APP="$HOME/.local/bin/herdr-app"
+HC="$HOME/.local/bin/hc"
+SPACE="슈퍼도리"
+TAB="맥손"
+DIR="$HOME/.dori-superagent"
+CMD="${MAC_HAND_CMD:-dori-skill mac serve}"
+
+say() { printf '%s\n' "$*"; }
+
+[ -x "$APP" ] || { say "herdr-app 이 없어: $APP" >&2; exit 1; }
+[ -x "$HC" ] || { say "hc 가 없어: $HC" >&2; exit 1; }
+
+# 앱이 꺼져 있으면 연다.
+if ! "$APP" status >/dev/null 2>&1; then
+  say "Herdr 앱을 열게."
+  open -a Herdr
+  i=0
+  while [ "$i" -lt 300 ]; do
+    "$APP" status >/dev/null 2>&1 && break
+    sleep 0.2
+    i=$((i + 1))
+  done
+fi
+
+# space/tab 이름으로 값을 뽑는다. 인자: space 이름|id, tab 이름(없으면 첫 탭), 필드(space|term)
+pick() {
+  "$APP" ls 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => { raw += c; });
+    process.stdin.on("end", () => {
+      let spaces = [];
+      try { spaces = JSON.parse(raw).spaces ?? []; } catch { process.exit(0); }
+      const space = spaces.find((s) => s.name === process.argv[1] || s.id === process.argv[1]);
+      if (!space) process.exit(0);
+      if (process.argv[3] === "space") { process.stdout.write(space.id); return; }
+      const want = process.argv[2];
+      const tab = want ? (space.tabs ?? []).find((t) => t.name === want) : (space.tabs ?? [])[0];
+      const term = tab && (tab.terminals ?? [])[0];
+      if (term) process.stdout.write(term.terminal);
+    });
+  ' "$1" "$2" "$3"
+}
+
+space_id=$(pick "$SPACE" "" space)
+[ -n "$space_id" ] || { say "${SPACE} space 를 못 찾았어." >&2; exit 1; }
+
+term=$(pick "$space_id" "$TAB" term)
+if [ -z "$term" ]; then
+  "$APP" do tab.new --space "$space_id" --name "$TAB" --folder "$DIR" >/dev/null 2>&1 || true
+  sleep 0.3
+  term=$(pick "$space_id" "$TAB" term)
+fi
+[ -n "$term" ] || { say "${TAB} 탭의 터미널을 못 찾았어." >&2; exit 1; }
+
+# 지금 foreground 프로그램 이름 (serve 면 argv[0] 이 bun).
+fg_prog() {
+  "$HC" get "$1" 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => { raw += c; });
+    process.stdin.on("end", () => {
+      try {
+        const a = JSON.parse(raw).foreground?.argv ?? [];
+        process.stdout.write(String(a[0] ?? "").split("/").pop());
+      } catch {}
+    });
+  '
+}
+
+cur=$(fg_prog "$term")
+case "$cur" in
+  bun) say "${term} 에 이미 맥손(serve)이 떠 있어."; exit 0 ;;
+  zsh|-zsh|bash|-bash|sh|"") ;;
+  *) say "${term} 에서 다른 프로그램(${cur})이 돌고 있어서 건드리지 않을게." >&2; exit 0 ;;
+esac
+
+say "${term} 에 맥손을 띄울게."
+env -u HC_TERMINAL_ID -u HC_SCOPE "$HC" send "$term" "cd '$DIR' && $CMD" >/dev/null 2>&1 || true
+# 재부팅 후에도 빈 셸로 남도록 keep 을 확인해 둔다.
+"$HC" keep "$term" >/dev/null 2>&1 || true
+say "완료 (${SPACE} / ${TAB} = ${term})."

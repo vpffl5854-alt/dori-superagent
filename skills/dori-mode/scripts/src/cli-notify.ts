@@ -6,7 +6,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
-import { dorichatBot } from "./cli-dorichat.ts";
+import { dorichatBot } from "./dorichat-bot.ts";
 import type { DoriConfig } from "./config.ts";
 
 export type Queued = { readonly at: string; readonly source: string; readonly text: string };

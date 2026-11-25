@@ -1,5 +1,5 @@
 /** dori dorichat: 도리방's listener (button presses and the owner's text) and the approval buttons the briefing sends. */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Command, die } from "./cli-context.ts";
 import { appendDecision } from "./cli-decisions.ts";
@@ -14,20 +14,11 @@ import {
   pressAnswer,
 } from "./dorichat.ts";
 import { rememberText } from "./decisions.ts";
-import { fetchHttp } from "./messenger/http.ts";
-import { Telegram } from "./messenger/telegram.ts";
-import { realClock, run } from "./run.ts";
-
-export type DorichatConfig = {
-  /** File holding 도리방's bot token (outside the repo, 0600). */
-  readonly tokenFile?: string;
-  /** The owner's Telegram user id: only the owner's presses and text count. */
-  readonly ownerId?: number;
-  /** The private chat with the owner (the same number as ownerId for a private chat). */
-  readonly chatId?: number;
-  /** The argv the lead answers with, shown in the forwarded line (`… "<답>"`). */
-  readonly replyArgv?: readonly string[];
-};
+import { parseMacPress, stopWord } from "./mac.ts";
+import { decidePending, stopPath } from "./mac-jobs.ts";
+import { type DorichatConfig, dorichatBot } from "./dorichat-bot.ts";
+import type { Telegram } from "./messenger/telegram.ts";
+import { run } from "./run.ts";
 
 type Update = {
   update_id: number;
@@ -40,16 +31,9 @@ type Update = {
   };
 };
 
-const cfgOf = (config: DoriConfig): DorichatConfig => (config as { dorichat?: DorichatConfig }).dorichat ?? {};
 const harnessOf = (config: DoriConfig): readonly string[] =>
   (config as { incidents?: { harness?: readonly string[] } }).incidents?.harness ??
   die("no incidents.harness to reach the lead");
-
-export const dorichatBot = (config: DoriConfig): { tg: Telegram; cfg: DorichatConfig } | undefined => {
-  const cfg = cfgOf(config);
-  if (!cfg.tokenFile || !existsSync(cfg.tokenFile)) return undefined;
-  return { tg: new Telegram(fetchHttp, realClock, readFileSync(cfg.tokenFile, "utf8").trim()), cfg };
-};
 
 /** The briefing's approvals as one message with a row of buttons per item. */
 export const sendApprovals = async (config: DoriConfig, items: readonly Approval[]): Promise<boolean> => {
@@ -90,6 +74,23 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
   if (cq) {
     if (cq.from.id !== cfg.ownerId)
       return void (await tg.call("answerCallbackQuery", { callback_query_id: cq.id, text: "주인만 누를 수 있어요" }));
+    const mp = parseMacPress(cq.data);
+    if (mp) {
+      const ok = decidePending(config, mp.id, mp.action === "go");
+      const text = !ok
+        ? `${mp.id}: 이미 처리했어요`
+        : mp.action === "go"
+          ? `${mp.id}: 진행 — 맥손이 할게요`
+          : `${mp.id}: 버렸어요`;
+      await tg.call("answerCallbackQuery", { callback_query_id: cq.id, text });
+      if (cq.message)
+        await tg.call("editMessageReplyMarkup", {
+          chat_id: cq.message.chat.id,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+      return void console.log(`DORICHAT_MAC ${mp.action} ${mp.id} ok=${ok}`);
+    }
     const p = parsePress(cq.data);
     if (!p) return void (await tg.call("answerCallbackQuery", { callback_query_id: cq.id }));
     // A second tap can land before the buttons are gone: an item already decided is not acted on again.
@@ -119,6 +120,14 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
   const m = u.message;
   if (!m?.text || m.from?.id !== cfg.ownerId) return;
   if (m.text.trim() === "/start") return;
+  const sw = stopWord(m.text);
+  if (sw === "stop") writeFileSync(stopPath(config), new Date().toISOString());
+  if (sw === "resume") rmSync(stopPath(config), { force: true });
+  if (sw)
+    await tg.send(
+      { chatId: m.chat.id },
+      sw === "stop" ? '맥 조작을 멈췄어요. 다시 하려면 "재개"' : "맥 조작을 다시 할 수 있어요",
+    );
   const remember = rememberText(m.text);
   if (remember) {
     appendDecision(config, remember, "도리방");

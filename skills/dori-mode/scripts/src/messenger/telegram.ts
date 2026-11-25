@@ -67,16 +67,34 @@ export class Telegram {
   }
 
   /** Uploads a video (multipart, so no JSON body); Telegram bots may send files up to 50 MB. */
-  async sendVideo(t: TgTarget, bytes: Uint8Array<ArrayBuffer>, filename: string, caption = ""): Promise<number> {
+  sendVideo(t: TgTarget, bytes: Uint8Array<ArrayBuffer>, filename: string, caption = ""): Promise<number> {
+    return this.upload("sendVideo", "video", new Blob([bytes], { type: "video/mp4" }), filename, t, caption, {
+      supports_streaming: "true",
+    });
+  }
+
+  /** Uploads a photo (PNG or JPEG bytes) with an optional caption. */
+  sendPhoto(t: TgTarget, bytes: Uint8Array<ArrayBuffer>, filename: string, caption = ""): Promise<number> {
+    return this.upload("sendPhoto", "photo", new Blob([bytes], { type: "image/png" }), filename, t, caption);
+  }
+
+  private async upload(
+    method: string,
+    field: string,
+    blob: Blob,
+    filename: string,
+    t: TgTarget,
+    caption: string,
+    extra: Record<string, string> = {},
+  ): Promise<number> {
     const form = new FormData();
-    for (const [k, v] of Object.entries(this.where(t))) form.append(k, String(v));
+    for (const [k, v] of Object.entries({ ...this.where(t), ...extra })) form.append(k, String(v));
     if (caption) form.append("caption", guardText(caption).slice(0, 1024));
-    form.append("supports_streaming", "true");
-    form.append("video", new Blob([bytes], { type: "video/mp4" }), filename);
+    form.append(field, blob, filename);
     const res = await withBackoff(
       this.http,
       this.clock,
-      { method: "POST", url: `${this.base}/bot${this.botToken}/sendVideo`, body: form },
+      { method: "POST", url: `${this.base}/bot${this.botToken}/${method}`, body: form },
       undefined,
       retryAfter,
     );
@@ -86,7 +104,7 @@ export class Telegram {
       description?: string;
     };
     if (!body.ok || !body.result)
-      throw new MessengerError(`telegram sendVideo: ${body.description ?? res.status}`, res.status);
+      throw new MessengerError(`telegram ${method}: ${body.description ?? res.status}`, res.status);
     return body.result.message_id;
   }
 
