@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dorichatBot } from "./dorichat-bot.ts";
 import type { DoriConfig } from "./config.ts";
-import type { MacTask } from "./mac.ts";
+import { findWindow, type MacTask, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type GoalResult, runGoal } from "./mac-goal.ts";
 import { isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
@@ -52,6 +52,12 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
     };
     const learned = readLearned(config)[goalKey(goal)];
     if (learned) {
+      // A learned task starts where the model's run started: with its app open.
+      const wins = ((await engine.call("windows")).result as Win[] | undefined) ?? [];
+      if (!findWindow(wins, learned.app)) {
+        await openApp(learned.app);
+        await Bun.sleep(1_500);
+      }
       const r = await runTask(engine, learned, base);
       if (r.ok)
         return {

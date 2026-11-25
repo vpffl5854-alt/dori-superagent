@@ -5,7 +5,7 @@
  * every step.
  */
 import type { Engine, Reply } from "./mac-engine.ts";
-import { findRef, findWindow, type MacTask, shownValues, showsValue, type Win } from "./mac.ts";
+import { findRef, findWindow, type MacTask, parseStep, shownValues, showsValue, type Win } from "./mac.ts";
 
 export type RunOpts = {
   readonly stopped: () => boolean;
@@ -64,23 +64,33 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
       await o.sleep(o.waitMs);
     }
   };
-  const w = await windowNow();
+  let w = await windowNow();
   if (!w) return done(false, `${t.app} 창을 못 찾았어요`);
   if (!(await ownerAway())) return done(false, `지브가 ${t.app}을(를) 쓰는 중이라 멈췄어요`, [], w.id);
   if (o.photos) before = await photo(e, w.id);
   for (const step of t.steps) {
     if (o.stopped()) return done(false, `도리방 "멈춰"로 멈췄어요 (${step} 전에)`, [], w.id);
     if (!(await ownerAway())) return done(false, `지브가 ${t.app}을(를) 쓰는 중이라 멈췄어요`, [], w.id);
-    const ref = findRef(await snapshotOf(e, w.id), step);
-    if (!ref) return done(false, `"${step}" 버튼을 못 찾았어요`, [], w.id);
+    // A menu or shortcut may have opened a new window of the app: each step works in the app's current window.
+    w = (await windowNow()) ?? w;
+    const st = parseStep(step);
+    const ref = st.kind === "press" ? findRef(await snapshotOf(e, w.id), step) : undefined;
+    if (st.kind === "press" && !ref) return done(false, `"${step}" 버튼을 못 찾았어요`, [], w.id);
     for (;;) {
-      const r = await e.call("ax.perform", { ref, action: "AXPress" });
+      const r =
+        st.kind === "menu"
+          ? await e.call("menus.select", { windowId: w.id, path: st.path })
+          : st.kind === "key"
+            ? await e.call("keyChord", { target: w.id, keys: st.keys })
+            : await e.call("ax.perform", { ref, action: "AXPress" });
       if (!r.error) break;
       if (!heldForOwner(r) || waited >= o.maxWaits)
-        return done(false, `"${step}" 못 눌렀어요: ${r.error.message}`, [], w.id);
+        return done(false, `"${step}" 못 했어요: ${r.error.message}`, [], w.id);
       waited++;
       await o.sleep(o.waitMs);
     }
+    // A menu or a shortcut can open a window or a sheet: the next step reads the screen after it has settled.
+    if (st.kind !== "press") await o.sleep(Math.min(o.waitMs, 800));
   }
   const after = await snapshotOf(e, w.id);
   const ok = t.expect === undefined || showsValue(after, t.expect);

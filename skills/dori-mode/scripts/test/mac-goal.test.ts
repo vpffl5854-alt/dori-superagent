@@ -41,14 +41,23 @@ test("도리방 text is a Mac request only when it starts with 맥", () => {
 });
 
 test("the question carries the goal, the controls by name and what was done", () => {
-  const p = prompt("6 곱하기 7", ["계산기"], "계산기", '- button "6" [ref=e2]', [
-    { act: "계산기 열기", result: "열었음" },
-  ]);
+  const p = prompt(
+    "6 곱하기 7",
+    ["계산기"],
+    "계산기",
+    '- button "6" [ref=e2]',
+    "보기 > 기본(Cmd+1)",
+    ["계산기 화면에 42가 보인다"],
+    [{ act: "계산기 열기", result: "열었음" }],
+  );
   expect(p).toContain("Goal (Korean): 6 곱하기 7");
   expect(p).toContain('- button "6" [ref=e2]');
   expect(p).toContain("1. 계산기 열기 -> 열었음");
+  expect(p).toContain("보기 > 기본(Cmd+1)");
+  expect(p).toContain("1. 계산기 화면에 42가 보인다");
 });
 
+const calls: string[] = [];
 const engine = (): Engine => {
   let shown = "0";
   const call = async (method: string, params: Record<string, unknown> = {}): Promise<Reply> => {
@@ -58,10 +67,14 @@ const engine = (): Engine => {
         result: { text: `- statictext "f" [ref=e1]: "${shown}"\n- button "6" [ref=e2]\n- button "보내기" [ref=e3]` },
       };
     if (method === "ax.perform") shown = params["ref"] === "e2" ? "6" : shown;
+    if (method === "menus.items") return { result: [] };
+    if (method === "menus.select") shown = (params["path"] as string[]).join(">") === "보기>기본" ? "기본" : shown;
+    if (method === "keyChord") calls.push((params["keys"] as string[]).join("+"));
     return { result: {} };
   };
   return { call, close: async () => undefined };
 };
+const PLAN = '{"feasible":true,"milestones":["계산기 화면에 6이 보인다"]}';
 const deps = (
   answers: Record<"deepseek" | "sonnet", string[]>,
   held: MacTask[] = [],
@@ -86,13 +99,18 @@ const deps = (
 
 test("two bad DeepSeek turns hand the task to Sonnet, whose presses are learned as a recipe", async () => {
   const d = deps({
-    deepseek: ["모르겠어요", '{"do":"press","app":"계산기","step":"없는 버튼"}'],
-    sonnet: ['{"do":"press","app":"계산기","step":"6"}', '{"do":"done","answer":"6을 눌렀어요"}'],
+    deepseek: [PLAN, "모르겠어요", '{"do":"press","app":"계산기","step":"없는 버튼"}'],
+    sonnet: [
+      '{"reflect":"없는 버튼이었다","do":"press","app":"계산기","step":"6"}',
+      '{"do":"done","answer":"6을 눌렀어요"}',
+    ],
   });
   const r = await runGoal(engine(), "계산기에 6", d);
   expect(r.ok).toBe(true);
   expect(r.tiers).toEqual(["deepseek", "sonnet"]);
-  expect(d.asked).toEqual(["deepseek", "deepseek", "sonnet", "sonnet"]);
+  expect(d.asked).toEqual(["deepseek", "deepseek", "deepseek", "sonnet", "sonnet"]);
+  expect(r.plan).toEqual(["계산기 화면에 6이 보인다"]);
+  expect(r.history.some((h) => h.act.includes("돌아보기: 없는 버튼이었다"))).toBe(true);
   expect(r.recipe).toEqual({ app: "계산기", steps: ["6"] });
 });
 
@@ -101,7 +119,7 @@ test("a send/pay/delete press ends the run and is held for 도리방, never pres
   const r = await runGoal(
     engine(),
     "보내",
-    deps({ deepseek: ['{"do":"press","app":"계산기","step":"보내기"}'], sonnet: [] }, held),
+    deps({ deepseek: [PLAN, '{"do":"press","app":"계산기","step":"보내기"}'], sonnet: [] }, held),
   );
   expect(r.ok).toBe(false);
   expect(r.held).toBe(true);
@@ -113,7 +131,7 @@ test("Sonnet giving up ends the task with its reason", async () => {
   const r = await runGoal(
     engine(),
     "소넷으로 불가능한 일",
-    deps({ deepseek: [], sonnet: ['{"do":"fail","reason":"그런 버튼이 없어요"}'] }),
+    deps({ deepseek: [], sonnet: [PLAN, '{"do":"fail","reason":"그런 버튼이 없어요"}'] }),
   );
   expect(r.ok).toBe(false);
   expect(r.text).toBe("그런 버튼이 없어요");
@@ -128,4 +146,45 @@ test("an OmO model ref splits into its provider and the model id there", async (
   });
   expect(splitModel("deepseek")).toBeUndefined();
   expect(splitModel("hive2/")).toBeUndefined();
+});
+
+test("a request DeepSeek calls impossible is asked of Sonnet; Sonnet's no ends it with nothing touched", async () => {
+  const d = deps({
+    deepseek: ['{"feasible":false,"reason":"맥에 조도 센서가 없어요"}'],
+    sonnet: ['{"feasible":false,"reason":"맥에 조도 센서가 없어서 화면 밝기를 방에 맞출 수 없어요"}'],
+  });
+  const r = await runGoal(engine(), "방 밝기에 맞춰 영상 밝기 자동 조절", d);
+  expect(r.ok).toBe(false);
+  expect(r.text).toContain("할 수 없는 일이라 손대지 않았어요");
+  expect(r.tiers).toEqual(["deepseek", "sonnet"]);
+  expect(d.asked).toEqual(["deepseek", "sonnet"]);
+});
+
+test("menus and key chords are actions too, and land in the learned recipe; a delete chord is held", async () => {
+  const d = deps({
+    deepseek: [
+      PLAN,
+      '{"do":"menu","app":"계산기","path":["보기","기본"]}',
+      '{"do":"key","app":"계산기","keys":["CMD","1"]}',
+      '{"do":"done","answer":"기본으로 바꿨어요"}',
+    ],
+    sonnet: [],
+  });
+  const r = await runGoal(engine(), "계산기를 기본 모드로", d);
+  expect(r.ok).toBe(true);
+  expect(r.recipe).toEqual({ app: "계산기", steps: ["menu:보기>기본", "key:cmd+1"] });
+  const held: MacTask[] = [];
+  const h = await runGoal(
+    engine(),
+    "지워",
+    deps({ deepseek: [PLAN, '{"do":"key","app":"계산기","keys":["cmd","delete"]}'], sonnet: [] }, held),
+  );
+  expect(h.held).toBe(true);
+  expect(held).toEqual([{ app: "계산기", steps: ["key:cmd+delete"] }]);
+});
+
+test("an action that does not exist is answered with the list of those that do", async () => {
+  const { badAnswerNote } = await import("../src/mac-brain.ts");
+  expect(badAnswerNote('{"do":"triple_click","x":1}')).toContain("있는 동작: open, look, press");
+  expect(badAnswerNote("모르겠다")).toBe("JSON 한 개로 답하지 않음");
 });

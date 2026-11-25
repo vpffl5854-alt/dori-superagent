@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 
 import {
   dangerousSteps,
+  keyStep,
+  menuStep,
+  parseStep,
   findRef,
   modelView,
   nameOf,
@@ -108,4 +111,13 @@ test("the model's view puts controls first, cuts long values and hides secrets",
   expect(view).not.toContain("xpl_d7993a10");
   expect(view.split("\n")).toHaveLength(3);
   expect(redactSecrets("token=abcdefghijklmnopqrstuvwx 와 Bearer abc.def")).toBe("token=[가림] 와 Bearer [가림]");
+});
+
+test("a step may be a menu path or a key chord; deleting, quitting and sending chords are dangerous", () => {
+  expect(parseStep(menuStep(["파일", "신규"]))).toEqual({ kind: "menu", path: ["파일", "신규"] });
+  expect(parseStep(keyStep(["Cmd", "N"]))).toEqual({ kind: "key", keys: ["cmd", "n"] });
+  expect(parseStep("등호")).toEqual({ kind: "press", name: "등호" });
+  expect(
+    dangerousSteps(["key:cmd+n", "key:cmd+delete", "key:return", "key:cmd+q", "menu:파일>신규", "menu:편집>삭제"]),
+  ).toEqual(["key:cmd+delete", "key:return", "key:cmd+q", "menu:편집>삭제"]);
 });

@@ -9,8 +9,47 @@ export type MacTask = { readonly app: string; readonly steps: readonly string[];
 /** Words on a control whose press cannot be taken back. "지우기" (clear) is not one: it only clears a field. */
 const DANGER =
   /결제|구매|주문|송금|이체|삭제|휴지통|보내기|전송|게시|공유|업로드|탈퇴|해지|\b(pay|buy|purchase|order|delete|remove|trash|send|post|publish|submit|share|upload)\b/i;
+/** Key chords that delete, quit or send: Return alone sends a chat message in most chat apps. */
+const DANGER_KEYS = /^(cmd\+(q|delete|backspace|return|enter)|cmd\+shift\+(delete|backspace)|return|enter)$/i;
 
-export const dangerousSteps = (steps: readonly string[]): string[] => steps.filter((s) => DANGER.test(s));
+/**
+ * A step is a control's name (alternatives split by `|`), a menu path ("menu:파일>신규") or a key chord
+ * ("key:cmd+n"). Recipes keep all three, so a learned task can use the menu bar and shortcuts too.
+ */
+export type Step =
+  | { readonly kind: "press"; readonly name: string }
+  | { readonly kind: "menu"; readonly path: string[] }
+  | { readonly kind: "key"; readonly keys: string[] };
+export const menuStep = (path: readonly string[]): string => `menu:${path.join(">")}`;
+export const keyStep = (keys: readonly string[]): string => `key:${keys.join("+")}`;
+export const parseStep = (step: string): Step =>
+  step.startsWith("menu:")
+    ? {
+        kind: "menu",
+        path: step
+          .slice(5)
+          .split(">")
+          .map((p) => p.trim())
+          .filter(Boolean),
+      }
+    : step.startsWith("key:")
+      ? {
+          kind: "key",
+          keys: step
+            .slice(4)
+            .split("+")
+            .map((k) => k.trim().toLowerCase())
+            .filter(Boolean),
+        }
+      : { kind: "press", name: step };
+
+export const dangerousSteps = (steps: readonly string[]): string[] =>
+  steps.filter((s) => {
+    const st = parseStep(s);
+    return st.kind === "key"
+      ? DANGER_KEYS.test(st.keys.join("+"))
+      : DANGER.test(st.kind === "menu" ? st.path.join(" ") : s);
+  });
 
 /** "6, 곱하기 ,7" -> ["6", "곱하기", "7"]. */
 export const parseSteps = (text: string): string[] =>
