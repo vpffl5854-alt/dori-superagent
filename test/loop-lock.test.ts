@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { memFreePct } from "../src/host.ts";
 import { HOUR, loopTick, msUntilNext } from "../src/loop.ts";
-import { restore } from "../src/loop-lock.ts";
+import { acquire, restore } from "../src/loop-lock.ts";
 import { setup } from "./loop-setup.ts";
 
 describe("hourly loop", () => {
@@ -20,7 +21,7 @@ describe("hourly loop", () => {
     expect(d.store.item("work")!.status).toBe("open");
     d.store.clearStop();
 
-    writeFileSync(d.store.loopPath("lock"), JSON.stringify({ pid: process.ppid, at: 0, nonce: "other" }));
+    writeFileSync(d.store.loopPath("lock"), JSON.stringify({ pid: process.ppid, at: Date.now(), nonce: "other" }));
     expect((await tick()).skipped).toBe(`locked by pid ${process.ppid}`);
     expect(readFileSync(d.store.loopPath("lock"), "utf8")).toContain('"other"');
     writeFileSync(d.store.loopPath("lock"), '{"pid": 12');
@@ -51,7 +52,10 @@ describe("hardening", () => {
     const { d, add, tick } = setup({
       exec: (inner) => async (cmd, argv) => {
         if (cmd === "herdr" && argv[0] === "tab") {
-          writeFileSync(join(home, "loop", "lock"), JSON.stringify({ pid: process.ppid, at: 0, nonce: "usurper" }));
+          writeFileSync(
+            join(home, "loop", "lock"),
+            JSON.stringify({ pid: process.ppid, at: Date.now(), nonce: "usurper" }),
+          );
         }
         return inner(cmd, argv);
       },
@@ -132,4 +136,21 @@ describe("hardening", () => {
     d.store.setStop(d.now(), "maintenance");
     expect(await status()).toBe("stopped: maintenance");
   });
+});
+
+test("a lock from before this boot is taken over even when its pid now belongs to another live process", () => {
+  const home = mkdtempSync(join(tmpdir(), "loop-lock-boot-"));
+  try {
+    const path = join(home, "lock");
+    // pid 1 (launchd) is always alive; the lock was written an hour before the machine booted.
+    const boot = Date.now() - 60_000;
+    writeFileSync(path, JSON.stringify({ pid: 1, at: boot - 3_600_000, nonce: "last-boot" }));
+    const d = { store: { lockPath: () => path } } as unknown as Parameters<typeof acquire>[0];
+    const got = acquire(d, path, boot);
+    expect("nonce" in got).toBe(true);
+    writeFileSync(path, JSON.stringify({ pid: 1, at: boot + 1_000, nonce: "this-boot" }));
+    expect(acquire(d, path, boot)).toEqual({ holder: "locked by pid 1" });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

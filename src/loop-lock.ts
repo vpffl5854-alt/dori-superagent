@@ -1,8 +1,18 @@
 import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { uptime } from "node:os";
 import type { Deps } from "./harness.ts";
 
 type LockBody = { pid: number; at: number; nonce: string };
+
+/** When this machine booted (ms). A lock written before it belongs to a process from the last boot. */
+export const bootedAt = (): number => Date.now() - uptime() * 1000;
+
+/**
+ * Whether the lock's holder still runs. After a reboot the pid in a lock left behind can belong to some other process
+ * (on 11/25 the watchdog's old pid 736 was a system helper's), so a lock written before this boot is never alive.
+ */
+const holderAlive = (l: LockBody, boot: number): boolean => l.at >= boot && alive(l.pid);
 
 function alive(pid: number): boolean {
   try {
@@ -37,10 +47,15 @@ const sameLock = (a: LockBody | "missing" | "corrupt", b: LockBody | "missing" |
  * moved aside with rename(2), which only one process can win; if what was moved is not the lock judged stale, it
  * is linked back and this process backs off.
  */
-export function acquire(d: Deps, path: string = d.store.lockPath("loop")): { nonce: string } | { holder: string } {
+export function acquire(
+  d: Deps,
+  path: string = d.store.lockPath("loop"),
+  boot: number = bootedAt(),
+): { nonce: string } | { holder: string } {
   const nonce = randomUUID();
   const tmp = `${path}.${nonce}`;
-  writeFileSync(tmp, JSON.stringify({ pid: process.pid, at: d.now(), nonce }));
+  // Wall-clock time, not the deps clock: it is compared with the boot time, which a test clock knows nothing of.
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, at: Date.now(), nonce }));
   try {
     for (let i = 0; i < 3; i++) {
       try {
@@ -51,7 +66,7 @@ export function acquire(d: Deps, path: string = d.store.lockPath("loop")): { non
       }
       const seen = readLock(path);
       if (seen === "missing") continue;
-      if (seen !== "corrupt" && alive(seen.pid)) return { holder: `locked by pid ${seen.pid}` };
+      if (seen !== "corrupt" && holderAlive(seen, boot)) return { holder: `locked by pid ${seen.pid}` };
       const aside = `${path}.stale.${nonce}`;
       try {
         renameSync(path, aside);
