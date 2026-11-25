@@ -6,6 +6,7 @@
  */
 import type { Engine, Reply } from "./mac-engine.ts";
 import { findRef, findWindow, type MacTask, parseStep, shownValues, showsValue, type Win } from "./mac.ts";
+import { closesWindow, frameRef, SEVERAL_WINDOWS_NOTE, severalWindows } from "./mac-frame.ts";
 
 export type RunOpts = {
   readonly stopped: () => boolean;
@@ -14,7 +15,14 @@ export type RunOpts = {
   readonly waitMs: number;
   readonly maxWaits: number;
   readonly photos: boolean;
+  /** How long since the owner last touched the keyboard or mouse; unset, the owner counts as always there. */
+  readonly ownerIdleMs?: () => number;
 };
+
+/** An app can put itself in front (TextEdit's open panel does): the owner is using it only with recent input. */
+export const OWNER_IDLE_MS = 60_000;
+export const ownerUsing = (w: Win | undefined, o: Pick<RunOpts, "ownerIdleMs">): boolean =>
+  Boolean(w?.focused) && (o.ownerIdleMs?.() ?? 0) < OWNER_IDLE_MS;
 
 export type RunResult = {
   readonly ok: boolean;
@@ -58,14 +66,18 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
   const ownerAway = async (): Promise<boolean> => {
     for (;;) {
       const w = await windowNow();
-      if (!w?.focused) return true;
+      if (!ownerUsing(w, o)) return true;
       if (waited >= o.maxWaits) return false;
       waited++;
       await o.sleep(o.waitMs);
     }
   };
   let w = await windowNow();
-  if (!w) return done(false, `${t.app} 창을 못 찾았어요`);
+  if (!w)
+    return done(
+      false,
+      `${t.app} 창을 못 찾았어요 (열린 창이 하나도 없으면 단축키·메뉴도 못 보내요: 앱을 다시 열고, 열기 창이 뜨면 그 안의 버튼을 쓰세요)`,
+    );
   if (!(await ownerAway())) return done(false, `지브가 ${t.app}을(를) 쓰는 중이라 멈췄어요`, [], w.id);
   if (o.photos) before = await photo(e, w.id);
   for (const step of t.steps) {
@@ -74,7 +86,8 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
     // A menu or shortcut may have opened a new window of the app: each step works in the app's current window.
     w = (await windowNow()) ?? w;
     const st = parseStep(step);
-    const ref = st.kind === "press" ? findRef(await snapshotOf(e, w.id), step) : undefined;
+    const ref =
+      st.kind === "press" ? (findRef(await snapshotOf(e, w.id), step) ?? (await frameRef(e, w.id, step))) : undefined;
     if (st.kind === "press" && !ref) return done(false, `"${step}" 버튼을 못 찾았어요`, [], w.id);
     for (;;) {
       const r =
@@ -84,6 +97,12 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
             ? await e.call("keyChord", { target: w.id, keys: st.keys })
             : await e.call("ax.perform", { ref, action: "AXPress" });
       if (!r.error) break;
+      if (severalWindows(r)) {
+        // The window's own close button lands where a chord or a menu cannot (see mac-frame.ts).
+        const close = closesWindow(st) ? await frameRef(e, w.id, "창 닫기") : undefined;
+        if (close && !(await e.call("ax.perform", { ref: close, action: "AXPress" })).error) break;
+        return done(false, `"${step}" 못 했어요: ${SEVERAL_WINDOWS_NOTE}`, [], w.id);
+      }
       if (!heldForOwner(r) || waited >= o.maxWaits)
         return done(false, `"${step}" 못 했어요: ${r.error.message}`, [], w.id);
       waited++;

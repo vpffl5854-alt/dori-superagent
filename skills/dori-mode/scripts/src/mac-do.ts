@@ -11,7 +11,7 @@ import type { DoriConfig } from "./config.ts";
 import { findWindow, type MacTask, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type GoalResult, runGoal } from "./mac-goal.ts";
-import { isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
+import { hidIdleMs, isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
 import { explainPrompt, parseQuick, type Quick, volumeScript } from "./mac-quick.ts";
 import { runTask } from "./mac-run.ts";
 import { ask, type ThinkConfig } from "./mac-think.ts";
@@ -92,6 +92,7 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
       waitMs: c.waitMs ?? 10_000,
       maxWaits: c.maxWaits ?? 30,
       photos: true,
+      ownerIdleMs: hidIdleMs,
     };
     const learned = readLearned(config)[goalKey(goal)];
     if (learned) {

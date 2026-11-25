@@ -86,3 +86,73 @@ test("a wrong result is a failure with the value shown", async () => {
   expect(r.shown).toEqual(["6"]);
   expect(r.before).toBeUndefined();
 });
+
+/** An app with two windows: the engine sends no chord or menu to the window behind, but its own buttons land. */
+const twoWindows = () => {
+  const pressed: unknown[] = [];
+  const refused = {
+    error: {
+      code: -32003,
+      message: "this app has several windows (2); menu commands need the foreground grant",
+      data: { code: "BackgroundUnavailable" },
+    },
+  };
+  const call = async (method: string, params: Record<string, unknown> = {}): Promise<Reply> => {
+    if (method === "windows") return { result: [{ id: "7", app: "텍스트 편집기", title: "문서", focused: false }] };
+    if (method === "ax.snapshot") return { result: { text: '- window "문서" [ref=e1]\n  - button [ref=e2]' } };
+    if (method === "keyChord" || method === "menus.select") return refused;
+    if (method === "ax.query")
+      return {
+        result: [
+          { ref: "q3", title: null, description: null, x: 267, y: 57, width: 16 },
+          { ref: "q1", title: null, description: null, x: 221, y: 57, width: 16 },
+          { ref: "q2", title: null, description: null, x: 244, y: 57, width: 16 },
+          { ref: "q9", title: "저장", description: null, x: 400, y: 300, width: 60 },
+        ],
+      };
+    if (method === "ax.perform") pressed.push(params["ref"]);
+    return { result: {} };
+  };
+  return { engine: { call, close: async () => undefined } as Engine, pressed };
+};
+const EDIT = (steps: string[]) => ({ app: "텍스트 편집기", steps });
+
+test("a window's own buttons are pressed by name, left to right: 창 닫기, 창 최소화, 창 확대", async () => {
+  const { engine, pressed } = twoWindows();
+  const r = await runTask(engine, EDIT(["창 최소화", "창 확대", "창 닫기"]), opts({ photos: false }));
+  expect(r.ok).toBe(true);
+  expect(pressed).toEqual(["q2", "q3", "q1"]);
+});
+
+test("cmd+w or a 닫기 menu refused for several windows presses the window's close button instead", async () => {
+  for (const step of ["key:cmd+w", "menu:파일>닫기"]) {
+    const { engine, pressed } = twoWindows();
+    const r = await runTask(engine, EDIT([step]), opts({ photos: false }));
+    expect(r.ok).toBe(true);
+    expect(pressed).toEqual(["q1"]);
+  }
+});
+
+test("any other chord refused for several windows fails with a note that says what works instead", async () => {
+  const { engine, pressed } = twoWindows();
+  const r = await runTask(engine, EDIT(["key:cmd+n"]), opts({ photos: false }));
+  expect(r.ok).toBe(false);
+  expect(r.note).toContain("창이 여러 개");
+  expect(pressed).toEqual([]);
+});
+
+test("an app that puts itself in front is not the owner using it: no wait without recent input", async () => {
+  const idle = await runTask(
+    fakeEngine({ focused: [true, true, true] }).engine,
+    TASK,
+    opts({ ownerIdleMs: () => 90_000 }),
+  );
+  expect(idle.ok).toBe(true);
+  expect(idle.waited).toBe(0);
+  const busy = await runTask(
+    fakeEngine({ focused: [true, true, false] }).engine,
+    TASK,
+    opts({ ownerIdleMs: () => 2_000 }),
+  );
+  expect(busy.waited).toBe(1);
+});

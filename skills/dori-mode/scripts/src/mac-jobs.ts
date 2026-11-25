@@ -40,6 +40,13 @@ export const newId = (now = new Date()): string =>
 /** Inside a Herdr terminal the engine can start right here. */
 export const inHerdr = (env = process.env): boolean => Boolean(env["HC_TERMINAL_ID"] ?? env["HERDR_PANE_ID"]);
 
+/** Milliseconds since the last keyboard or mouse input (IOHIDSystem's HIDIdleTime); 0 when it cannot be read. */
+export const hidIdleMs = (): number => {
+  const out = Bun.spawnSync(["ioreg", "-c", "IOHIDSystem", "-d", "4"]).stdout.toString();
+  const ns = /"HIDIdleTime" = (\d+)/.exec(out)?.[1];
+  return ns ? Number(BigInt(ns) / 1_000_000n) : 0;
+};
+
 export const execute = async (config: DoriConfig, task: MacTask, photos = true): Promise<RunResult> => {
   const c = macConfig(config);
   const path = enginePath(c.engine);
@@ -54,6 +61,7 @@ export const execute = async (config: DoriConfig, task: MacTask, photos = true):
       waitMs: c.waitMs ?? 10_000,
       maxWaits: c.maxWaits ?? 30,
       photos,
+      ownerIdleMs: hidIdleMs,
     });
   } finally {
     await engine.close();

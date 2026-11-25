@@ -102,6 +102,7 @@ export const prompt = (
     '"do":"open","app":"<app name>"            open an app in the background (Korean or English name)',
     '"do":"look","app":"<app name>"            switch to another app (the app you work in is shown again every turn)',
     '"do":"press","app":"<app>","step":"<exact control name, or its ref like e12 when it has no name>"',
+    '   the window\'s own top-left buttons are pressable as "창 닫기", "창 최소화", "창 확대"',
     '"do":"type","app":"<app>","field":"<exact field name, or its ref like e449>","text":"<text>"',
     '"do":"menu","app":"<app>","path":["파일","신규"]   choose a menu bar item by its labels above',
     '"do":"key","app":"<app>","keys":["cmd","n"]        press a key chord in that app',
@@ -109,6 +110,7 @@ export const prompt = (
     '"do":"fail","reason":"<Korean: why it cannot be done>"',
     'Add "plan":[...] only when the plan above turned out wrong. Say done only when the screen shows the last milestone.',
     "Use only names, refs and menu labels shown above. Never pay, delete, send or post unless the goal says so.",
+    "A key chord or a menu needs a window of the app: never close or cancel the app's last window (a file-open panel is one; use its own buttons such as 새로운 문서 / New Document instead).",
     "Never answer a permission or password prompt (허용, Allow, 암호): stop with fail and say what it asks; the owner decides.",
     "Never type into a field that already shows text (it is the owner's own writing) unless the goal says to change it.",
   ].join("\n");

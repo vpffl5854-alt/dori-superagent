@@ -15,7 +15,7 @@ import {
   type Win,
 } from "./mac.ts";
 import type { Engine } from "./mac-engine.ts";
-import { type RunOpts, runTask } from "./mac-run.ts";
+import { ownerUsing, type RunOpts, runTask } from "./mac-run.ts";
 
 type MenuItem = {
   readonly title: string;
@@ -109,7 +109,7 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
   if (/^e\d+$/.test(step)) {
     if (c.shown?.app !== findWindow(c.wins, act.app)?.app)
       return { ok: false, result: `"${step}"는 지금 보는 앱의 것이 아니에요` };
-    if (c.shown?.focused)
+    if (ownerUsing(c.shown, c))
       return { ok: false, result: "", end: { text: `지브가 ${act.app}을(를) 쓰는 중이라 멈췄어요`, held: false } };
     if (c.stopped()) return { ok: false, result: "", end: { text: '도리방 "멈춰"로 멈췄어요', held: false } };
     const r = await e.call("ax.perform", { ref: step, action: "AXPress" });
