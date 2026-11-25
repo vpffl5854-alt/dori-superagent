@@ -20,6 +20,7 @@ cp ~/Library/LaunchAgents/com.dori.*.plist ~/Library/LaunchAgents/com.jib.devin-
 [ -f "$HOME/dori-superagent/HANDOVER.md" ] && cp "$HOME/dori-superagent/HANDOVER.md" "$DEST/repo-local/"
 [ -f "$HOME/.local/bin/dori-skill" ] && cp -L "$HOME/.local/bin/dori-skill" "$DEST/repo-local/"
 [ -f "$HOME/.config/devin/AGENTS.md" ] && cp "$HOME/.config/devin/AGENTS.md" "$DEST/repo-local/devin-AGENTS.md"
+[ -f "$HOME/.config/devin/hooks/jib-rules" ] && cp "$HOME/.config/devin/hooks/jib-rules" "$DEST/repo-local/devin-hook-jib-rules"
 cat > "$DEST/README.md" <<'MD'
 # 슈퍼도리 백업 (비공개)
 Mac 에만 있던 것. 비밀 값(토큰)은 없다 — 다시 발급해서 `~/.dori-superagent/secrets/` 에 넣는다.
