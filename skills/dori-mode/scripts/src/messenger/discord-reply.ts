@@ -102,6 +102,23 @@ export const sessionSize = (sessionPath: string): number => {
 };
 
 /** Posts the answer as a Discord reply to the message that asked, split across messages when it is too long. */
+/**
+ * A link written without its scheme ("tokenharbor.ai/models/x") is plain text in Discord, not a link: the owner got an
+ * answer whose links could not be opened (11/25). A bare domain with a path, or one starting with www., gets https://.
+ * Anything already a link, an e-mail address, or inside `code` is left as it is.
+ */
+export const linkify = (text: string): string =>
+  text
+    .split(/(`[^`\n]*`)/)
+    .map((part) =>
+      part.startsWith("`")
+        ? part
+        : part.replace(/(?<![\w@/.:-])((?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s·,)\]]*)?)/gi, (m: string) =>
+            /^www\./i.test(m) || (m.includes("/") && /\.[a-z]{2,}\//i.test(m)) ? `https://${m}` : m,
+          ),
+    )
+    .join("");
+
 export const postAnswer = async (
   discord: Discord,
   channel: string,
@@ -109,7 +126,7 @@ export const postAnswer = async (
   text: string,
 ): Promise<string[]> => {
   const ids: string[] = [];
-  for (const [index, part] of splitForDiscord(text).entries()) {
+  for (const [index, part] of splitForDiscord(linkify(text)).entries()) {
     ids.push(await discord.send(channel, part, index === 0 ? replyTo : undefined));
   }
   return ids;

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { formatInbound, toInbound } from "../src/messenger/discord-message.ts";
-import { answerText, lastAnswer, MAX_DISCORD_CHARS, splitForDiscord } from "../src/messenger/discord-reply.ts";
+import { answerText, lastAnswer, linkify, MAX_DISCORD_CHARS, splitForDiscord } from "../src/messenger/discord-reply.ts";
 
 const message = (extra: Record<string, unknown>) => ({
   id: "2",
@@ -68,4 +68,17 @@ test("lastAnswer reads only what was written after the offset", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a link written without https:// becomes one Discord opens; real links, code, mail and prose stay", () => {
+  expect(linkify("링크: tokenharbor.ai/models/deepseek-v4.1-flash:free · orcarouter.ai/models/x")).toBe(
+    "링크: https://tokenharbor.ai/models/deepseek-v4.1-flash:free · https://orcarouter.ai/models/x",
+  );
+  expect(linkify("www.sume.com 참고")).toBe("https://www.sume.com 참고");
+  expect(linkify("이미 https://openrouter.ai/deepseek 링크")).toBe("이미 https://openrouter.ai/deepseek 링크");
+  expect(linkify("base `api.orcarouter.ai/v1` 그대로")).toBe("base `api.orcarouter.ai/v1` 그대로");
+  expect(linkify("메일 a@b.com, 파일 config.json, 버전 v4.1, 1.5배")).toBe(
+    "메일 a@b.com, 파일 config.json, 버전 v4.1, 1.5배",
+  );
+  expect(linkify("tokenrouter.com 은 게이트웨이")).toBe("tokenrouter.com 은 게이트웨이");
 });
