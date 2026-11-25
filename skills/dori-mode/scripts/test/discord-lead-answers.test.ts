@@ -79,6 +79,51 @@ test("a message enqueued while the lead is working still posts that message's ow
     expect(sent(posts(seen)[0])["content"]).toBe("다음 메시지의 답");
   }));
 
+test("the line the pane writes first is not the answer: the room gets the last one, once the turn is over", () =>
+  withState(async (stateDir) => {
+    const sessionLog = join(stateDir, "lead.jsonl");
+    const assistant = (text: string) =>
+      `${JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text }] } })}\n`;
+    writeFileSync(sessionLog, "");
+    const { http, seen } = fakeHttp(() => ok({ id: "99" }));
+    let status = "idle";
+    let workingReads = 0;
+    const rts = {
+      for: () => ({
+        list: async () => {
+          if (status === "working") workingReads++;
+          return [{ ref: { runtime: "hc", id: "t74" }, status }];
+        },
+        deliver: async () => ({ kind: "delivered" }),
+        read: async () => "",
+      }),
+    } as unknown as ChosenRuntimes;
+    const replies = startDiscordReplies(
+      new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
+      stateDir,
+      { ...config(stateDir), leadPane: "hc:t74" },
+      undefined,
+      rts,
+      10,
+    );
+    try {
+      expect(await replies.enqueue({ channel: "c1", messageId: "11", sessionPath: sessionLog })).toBe(true);
+      status = "working";
+      appendFileSync(sessionLog, assistant("방 글 하나 왔네 — 본문 확인하고 바로 답할게."));
+      // The turn goes on with its tools while several reply polls see the first line.
+      while (workingReads < 5) await Bun.sleep(5);
+      expect(posts(seen)).toHaveLength(0);
+      appendFileSync(sessionLog, assistant("sume은 이름이 같은 게 둘이라 어느 쪽인지에 따라 답이 갈려."));
+      status = "idle";
+      const deadline = Date.now() + 3_000;
+      while (posts(seen).length === 0 && Date.now() < deadline) await Bun.sleep(5);
+    } finally {
+      replies.stop();
+    }
+    expect(posts(seen)).toHaveLength(1);
+    expect(sent(posts(seen)[0])["content"]).toBe("sume은 이름이 같은 게 둘이라 어느 쪽인지에 따라 답이 갈려.");
+  }));
+
 test("the room's pane is found by its name when a restart gave it a new address", () =>
   withState(async (stateDir) => {
     const sessionsDir = join(stateDir, "sessions");
