@@ -188,3 +188,23 @@ test("an action that does not exist is answered with the list of those that do",
   expect(badAnswerNote('{"do":"triple_click","x":1}')).toContain("있는 동작: open, look, press");
   expect(badAnswerNote("모르겠다")).toBe("JSON 한 개로 답하지 않음");
 });
+
+test("the head never answers a permission prompt itself: pressing 허용 there is held for 도리방", async () => {
+  const held: MacTask[] = [];
+  const e: Engine = {
+    call: async (method) =>
+      method === "windows"
+        ? { result: [{ id: "569", app: "UserNotificationCenter", title: "", focused: false }] }
+        : method === "ax.snapshot"
+          ? { result: { text: '- button "허용 안 함" [ref=e6]\n- button "허용" [ref=e7]' } }
+          : { result: [] },
+    close: async () => undefined,
+  };
+  const r = await runGoal(
+    e,
+    "권한 창 허용해",
+    deps({ deepseek: [PLAN, '{"do":"press","app":"UserNotificationCenter","step":"허용"}'], sonnet: [] }, held),
+  );
+  expect(r.held).toBe(true);
+  expect(held).toEqual([{ app: "UserNotificationCenter", steps: ["허용"] }]);
+});

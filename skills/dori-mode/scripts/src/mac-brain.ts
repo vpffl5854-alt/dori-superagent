@@ -109,6 +109,7 @@ export const prompt = (
     '"do":"fail","reason":"<Korean: why it cannot be done>"',
     'Add "plan":[...] only when the plan above turned out wrong. Say done only when the screen shows the last milestone.',
     "Use only names, refs and menu labels shown above. Never pay, delete, send or post unless the goal says so.",
+    "Never answer a permission or password prompt (허용, Allow, 암호): stop with fail and say what it asks; the owner decides.",
     "Never type into a field that already shows text (it is the owner's own writing) unless the goal says to change it.",
   ].join("\n");
 

@@ -43,6 +43,16 @@ export const parseStep = (step: string): Step =>
         }
       : { kind: "press", name: step };
 
+/**
+ * Apps that ask for the owner's consent: macOS permission prompts (UserNotificationCenter), password and Touch ID
+ * sheets, Gatekeeper, System Settings. A press there can grant an app control of the Mac, so it is always the owner's
+ * call: every step in them waits for 도리방, whatever its name ("허용" is not a dangerous word anywhere else).
+ */
+export const isConsentApp = (app: string): boolean =>
+  /usernotificationcenter|securityagent|coreservicesuiagent|coreauth|시스템 설정|system settings|system preferences/i.test(
+    app,
+  );
+
 export const dangerousSteps = (steps: readonly string[]): string[] =>
   steps.filter((s) => {
     const st = parseStep(s);

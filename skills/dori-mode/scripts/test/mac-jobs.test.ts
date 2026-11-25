@@ -55,3 +55,10 @@ test("a spoken request queues as a goal for 맥손", () => {
   enqueue(c, { id: "m1", goal: "계산기로 6 곱하기 7", send: true });
   expect(dequeue(c)).toEqual({ id: "m1", goal: "계산기로 6 곱하기 7", send: true });
 });
+
+test("any step in a macOS permission prompt or System Settings waits for 도리방, even 허용 or 확인", async () => {
+  const c = cfg();
+  expect(await submit(c, { app: "UserNotificationCenter", steps: ["허용"] }, false, false, {})).toBe("held");
+  expect(await submit(c, { app: "시스템 설정", steps: ["확인"] }, false, false, {})).toBe("held");
+  expect(await submit(c, { app: "계산기", steps: ["확인"] }, false, false, {})).toBe("queued");
+});

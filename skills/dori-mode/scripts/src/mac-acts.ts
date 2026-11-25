@@ -3,7 +3,17 @@
  * so the stop switch, the owner-in-front wait and the danger hold apply to each of them alike.
  */
 import type { Act } from "./mac-brain.ts";
-import { dangerousSteps, findRef, findWindow, keyStep, type MacTask, menuStep, nameOf, type Win } from "./mac.ts";
+import {
+  dangerousSteps,
+  findRef,
+  isConsentApp,
+  findWindow,
+  keyStep,
+  type MacTask,
+  menuStep,
+  nameOf,
+  type Win,
+} from "./mac.ts";
 import type { Engine } from "./mac-engine.ts";
 import { type RunOpts, runTask } from "./mac-run.ts";
 
@@ -87,7 +97,7 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
         : /^e\d+$/.test(act.step)
           ? (nameOf(c.snapshot, act.step) ?? act.step)
           : act.step;
-  if (dangerousSteps([step]).length) {
+  if (dangerousSteps([step]).length || isConsentApp(act.app)) {
     await c.hold({ app: act.app, steps: [step] });
     return {
       ok: false,

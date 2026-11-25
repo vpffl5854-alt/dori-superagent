@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { dorichatBot } from "./dorichat-bot.ts";
 import type { DoriConfig } from "./config.ts";
-import { approvalText, dangerousSteps, type MacTask, macCallback, reportText } from "./mac.ts";
+import { approvalText, dangerousSteps, isConsentApp, type MacTask, macCallback, reportText } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type RunResult, runTask } from "./mac-run.ts";
 import type { ThinkConfig } from "./mac-think.ts";
@@ -108,7 +108,7 @@ export const submit = async (
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Submitted> => {
   const id = newId();
-  const danger = dangerousSteps(task.steps);
+  const danger = isConsentApp(task.app) ? [...task.steps] : dangerousSteps(task.steps);
   if (danger.length && !approved) {
     writeFileSync(macDir(config, "pending", `${id}.json`), JSON.stringify({ id, task, send }));
     const bot = dorichatBot(config);
