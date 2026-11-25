@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { type Browser, chromium } from "playwright-core";
 import { type Command, die } from "./cli-context.ts";
 import { fill } from "./config.ts";
+import { askOmoProvider, splitModel } from "./omo-provider.ts";
 import { run } from "./run.ts";
 import {
   CANARIES,
@@ -92,10 +93,14 @@ const heal = async (browser: Browser, dir: string, cfg: SnsConfig) => {
       console.log(`SNS_HEAL_FAILED ${key} page did not open`);
       continue;
     }
+    // The model is asked directly on its OmO provider: `omo -p` starts a whole agent and takes minutes, and the
+    // briefing's call on it timed out (exit 124).
     const ask = async (prompt: string) => {
-      if (!cfg.omo || !cfg.model) return null;
-      const r = await run([cfg.omo, "--model", cfg.model, "-p", prompt], { timeoutMs: 180_000 });
-      return r.code === 0 ? r.out : null;
+      const ref = cfg.model ? splitModel(cfg.model) : undefined;
+      if (!ref) return null;
+      const r = await askOmoProvider(ref.provider, ref.model, prompt, 180_000, 16_000);
+      if ("error" in r) console.log(`SNS_HEAL_ASK_FAILED ${r.error}`);
+      return "text" in r ? r.text : null;
     };
     const pairRule = rule.pair ? rules[e.platform]?.fields[rule.pair] : undefined;
     const pairCount = pairRule
