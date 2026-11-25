@@ -15,12 +15,16 @@ import { sendApprovals } from "./cli-dorichat.ts";
 import { clearQueue, readQueue } from "./cli-notify.ts";
 import { sessionCalls } from "./cli-route.ts";
 import { fill } from "./config.ts";
+import { askOmoProvider, splitModel } from "./omo-provider.ts";
 import { run } from "./run.ts";
 
 export type BriefingConfig = {
   /** Sends the message (`{text}`); the SNS alert's argv when absent. */
   readonly notifyArgv?: readonly string[];
-  /** omo binary and model that rewrite the briefing in plain Korean; the plain version goes out when absent or failing. */
+  /**
+   * The model ("provider/model" on one of OmO's providers) that rewrites the briefing in plain Korean, asked directly
+   * (omo-provider.ts); the plain version goes out when it fails or changes a number or link. `omo` is no longer read.
+   */
   readonly omo?: string;
   readonly model?: string;
   /** Prints one line of weather; the briefing says "미연결" when absent. */
@@ -163,26 +167,12 @@ const briefing: Command = async ({ values, config }) => {
   };
   const raw = renderBriefing(b);
   let text = raw;
-  if (cfg.omo) {
-    const r = await run(
-      [
-        cfg.omo,
-        "--model",
-        cfg.model ?? config.defaultModel,
-        // Its own session folder: a session filed under DORI_HOME's cwd becomes "the newest log there", and the Discord
-        // room's answers are read from that newest log, so 디코도리's replies were read from this rewrite and dropped.
-        "--session-dir",
-        join(config.stateDir, "briefing-sessions"),
-        "-p",
-        plainPrompt(raw),
-      ],
-      {
-        timeoutMs: 180_000,
-      },
-    );
-    const plain = r.out.trim();
-    if (r.code === 0 && keepsFacts(raw, plain)) text = plain;
-    else console.log(`BRIEFING_PLAIN_SKIPPED exit=${r.code}${r.code === 0 ? " (numbers or links changed)" : ""}`);
+  const ref = splitModel(cfg.model ?? config.defaultModel);
+  if (ref) {
+    const r = await askOmoProvider(ref.provider, ref.model, plainPrompt(raw), 180_000, 32_000);
+    const plain = "text" in r ? r.text : "";
+    if (plain && keepsFacts(raw, plain)) text = plain;
+    else console.log(`BRIEFING_PLAIN_SKIPPED ${"error" in r ? r.error : "(numbers or links changed)"}`);
   }
   // Only --no-send prints the text: the launchd log is scanned for faults, and a briefing quoting yesterday's errors
   // would be read back as new ones.

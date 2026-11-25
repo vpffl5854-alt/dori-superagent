@@ -27,7 +27,7 @@ export type RunResult = {
 };
 
 const snapshotOf = async (e: Engine, target: string): Promise<string> =>
-  ((await e.call("ax.snapshot", { target, opts: { all: true, maxNodes: 400 } })).result as { text?: string })?.text ??
+  ((await e.call("ax.snapshot", { target, opts: { all: true, maxNodes: 3000 } })).result as { text?: string })?.text ??
   "";
 
 const photo = async (e: Engine, target: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {

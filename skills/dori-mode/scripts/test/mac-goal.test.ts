@@ -119,3 +119,13 @@ test("Sonnet giving up ends the task with its reason", async () => {
   expect(r.text).toBe("그런 버튼이 없어요");
   expect(r.tiers).toEqual(["sonnet"]);
 });
+
+test("an OmO model ref splits into its provider and the model id there", async () => {
+  const { splitModel } = await import("../src/omo-provider.ts");
+  expect(splitModel("hive2/deepseek-ai/deepseek-v4.1-flash-1017")).toEqual({
+    provider: "hive2",
+    model: "deepseek-ai/deepseek-v4.1-flash-1017",
+  });
+  expect(splitModel("deepseek")).toBeUndefined();
+  expect(splitModel("hive2/")).toBeUndefined();
+});

@@ -16,7 +16,7 @@ import {
   type Turn,
   wantsSonnet,
 } from "./mac-brain.ts";
-import { dangerousSteps, findRef, findWindow, type MacTask, type Win } from "./mac.ts";
+import { dangerousSteps, findRef, findWindow, type MacTask, modelView, nameOf, type Win } from "./mac.ts";
 import type { Engine } from "./mac-engine.ts";
 import { type RunOpts, runTask } from "./mac-run.ts";
 import type { Thought } from "./mac-think.ts";
@@ -47,6 +47,12 @@ const photo = async (e: Engine, target: string): Promise<Uint8Array<ArrayBuffer>
   return r?.data ? new Uint8Array(Buffer.from(r.data, "base64")) : undefined;
 };
 
+const pressRef = async (e: Engine, ref: string, stopped: () => boolean) => {
+  if (stopped()) return { ok: false, note: '도리방 "멈춰"로 멈췄어요', shown: [] as string[] };
+  const r = await e.call("ax.perform", { ref, action: "AXPress" });
+  return { ok: !r.error, note: r.error ? `"${ref}" 못 눌렀어요: ${r.error.message}` : "", shown: [] as string[] };
+};
+
 export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<GoalResult> => {
   let tier: Tier = wantsSonnet(goal) ? "sonnet" : "deepseek";
   const tiers: Tier[] = [tier];
@@ -57,7 +63,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
   let before: Uint8Array<ArrayBuffer> | undefined;
   const windows = async (): Promise<Win[]> => ((await e.call("windows")).result as Win[] | undefined) ?? [];
   const snapshotOf = async (id: string): Promise<string> =>
-    ((await e.call("ax.snapshot", { target: id, opts: { all: true, maxNodes: 400 } })).result as { text?: string })
+    ((await e.call("ax.snapshot", { target: id, opts: { all: true, maxNodes: 3000 } })).result as { text?: string })
       ?.text ?? "";
   const finish = async (ok: boolean, text: string, held = false): Promise<GoalResult> => {
     const w = app ? findWindow(await windows(), app) : undefined;
@@ -94,7 +100,10 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
     const w = app ? findWindow(wins, app) : undefined;
     if (w && d.photos && !before) before = await photo(e, w.id);
     const snapshot = w ? await snapshotOf(w.id) : "";
-    const thought = await d.think(tier, prompt(goal, [...new Set(wins.map((x) => x.app))], w?.app, snapshot, history));
+    const thought = await d.think(
+      tier,
+      prompt(goal, [...new Set(wins.map((x) => x.app))], w?.app, modelView(snapshot), history),
+    );
     const act = "text" in thought ? parseAct(thought.text) : undefined;
     if (!act) {
       history.push({ act: "(모델 답 이상)", result: "error" in thought ? thought.error : "JSON 한 개로 답하지 않음" });
@@ -124,21 +133,43 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
       result = ok ? "봤음" : "그 앱 창이 없음";
     } else if (act.do === "press") {
       app = act.app;
-      if (dangerousSteps([act.step]).length) {
+      // A press by ref is judged by the name the control carries, so a ref cannot slip past the danger check.
+      const label = /^e\d+$/.test(act.step) ? (nameOf(snapshot, act.step) ?? act.step) : act.step;
+      if (dangerousSteps([label]).length) {
         await d.hold({ app: act.app, steps: [act.step] });
         return finish(false, `"${act.step}"은(는) 되돌릴 수 없는 버튼이라 도리방 승인을 기다려요`, true);
       }
-      const r = await runTask(e, { app: act.app, steps: [act.step] }, { ...d, photos: false });
+      // A ref is pressed by the name it carries (runTask reads the screen again, and refs change with every reading);
+      // a control with no name is pressed by the ref the model saw, right away.
+      const byRef = /^e\d+$/.test(act.step) && label === act.step;
+      if (byRef && (w?.app !== findWindow(wins, act.app)?.app || w?.focused))
+        return finish(
+          false,
+          w?.focused ? `지브가 ${act.app}을(를) 쓰는 중이라 멈췄어요` : `"${act.step}"는 지금 보는 앱의 것이 아니에요`,
+        );
+      const r = byRef
+        ? await pressRef(e, act.step, d.stopped)
+        : await runTask(e, { app: act.app, steps: [label] }, { ...d, photos: false });
       if (!r.ok && (r.note.includes("쓰는 중") || r.note.includes("멈춰"))) return finish(false, r.note);
       ok = r.ok;
       result = r.ok ? `눌렀음${r.shown.length ? `, 보이는 값: ${r.shown.slice(0, 3).join(", ")}` : ""}` : r.note;
     } else {
       app = act.app;
       const tw = findWindow(wins, act.app);
-      const ref = tw ? findRef(await snapshotOf(tw.id), act.field) : undefined;
-      const r = ref ? await e.call("ax.typeText", { ref, text: act.text }) : undefined;
+      // Refs belong to one reading of the screen: the model's ref is looked up in the snapshot it was shown.
+      const snap = tw && tw.id === w?.id ? snapshot : "";
+      const ref = findRef(snap, act.field);
+      // The owner's own writing is never typed over: a field that already shows text is refused, whatever the model says.
+      const filled = ref ? new RegExp(`\\[ref=${ref}\\][^\\n]*: "[^"]+`).test(snap) : false;
+      const r = ref && !filled ? await e.call("ax.typeText", { ref, text: act.text }) : undefined;
       ok = Boolean(r && !r.error);
-      result = ok ? "입력함" : ref ? `입력 못 함: ${r?.error?.message}` : `"${act.field}" 칸을 못 찾음`;
+      result = ok
+        ? "입력함"
+        : filled
+          ? "이미 글이 있는 칸이라 안 건드림"
+          : ref
+            ? `입력 못 함: ${r?.error?.message}`
+            : `"${act.field}" 칸을 못 찾음`;
     }
     history.push({ act: actLine(act), result });
     // Only what worked is learned: a failed press in the recipe would fail every replay.

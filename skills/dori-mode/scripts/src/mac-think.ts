@@ -3,9 +3,8 @@
  * key from ~/.omo/agent): `omo -p` takes minutes to start and the briefing's own call already times out on it.
  * Sonnet is Claude Code headless on the owner's Claude subscription, no tools, one turn.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Tier } from "./mac-brain.ts";
+import { askOmoProvider, type Thought } from "./omo-provider.ts";
 import type { Runner } from "./run.ts";
 
 export type ThinkConfig = {
@@ -16,47 +15,12 @@ export type ThinkConfig = {
   readonly claude?: string;
   readonly sonnetModel?: string;
 };
-export type Thought = { readonly text: string } | { readonly error: string };
+export type { Thought };
 
 const ASK_MS = 120_000;
 
-const omoProvider = (name: string, home: string): { baseUrl: string; key: string } | undefined => {
-  const agent = join(home, ".omo", "agent");
-  if (!existsSync(join(agent, "models.json")) || !existsSync(join(agent, "auth.json"))) return undefined;
-  const models = JSON.parse(readFileSync(join(agent, "models.json"), "utf8")) as {
-    providers?: Record<string, { baseUrl?: string }>;
-  };
-  const auth = JSON.parse(readFileSync(join(agent, "auth.json"), "utf8")) as Record<string, { key?: string }>;
-  const baseUrl = (models.providers ?? (models as Record<string, { baseUrl?: string }>))[name]?.baseUrl;
-  const key = auth[name]?.key;
-  return baseUrl && key ? { baseUrl, key } : undefined;
-};
-
-export const askDeepseek = async (
-  c: ThinkConfig,
-  prompt: string,
-  home = process.env["HOME"] ?? "",
-): Promise<Thought> => {
-  const p = omoProvider(c.provider ?? "hive2", home);
-  if (!p) return { error: `no OmO provider ${c.provider ?? "hive2"}` };
-  try {
-    const res = await fetch(`${p.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${p.key}` },
-      body: JSON.stringify({
-        model: c.deepseekModel ?? "deepseek-ai/deepseek-v4.1-flash-1017",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 2_000,
-      }),
-      signal: AbortSignal.timeout(ASK_MS),
-    });
-    const body = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[] };
-    const text = body.choices?.[0]?.message?.content?.trim();
-    return text ? { text } : { error: `deepseek answered ${res.status} with no text` };
-  } catch (e) {
-    return { error: `deepseek: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) };
-  }
-};
+export const askDeepseek = (c: ThinkConfig, prompt: string): Promise<Thought> =>
+  askOmoProvider(c.provider ?? "hive2", c.deepseekModel ?? "deepseek-ai/deepseek-v4.1-flash-1017", prompt, ASK_MS);
 
 export const askSonnet = async (c: ThinkConfig, prompt: string, run: Runner, cwd: string): Promise<Thought> => {
   const r = await run(

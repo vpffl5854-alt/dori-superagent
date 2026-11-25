@@ -21,8 +21,12 @@ export const parseSteps = (text: string): string[] =>
 
 const reEscape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The ref of the first control named like the step (any alternative), buttons before other roles. */
+/**
+ * The ref of the first control named like the step (any alternative), buttons before other roles. A step may also
+ * be a ref the snapshot shows (`e449`), for a control without a name such as a note's text area.
+ */
 export const findRef = (snapshot: string, step: string): string | undefined => {
+  if (/^e\d+$/.test(step)) return snapshot.includes(`[ref=${step}]`) ? step : undefined;
   const names = step.split("|").map((n) => n.trim());
   for (const role of ["button", "[a-z]+"])
     for (const n of names) {
@@ -30,6 +34,34 @@ export const findRef = (snapshot: string, step: string): string | undefined => {
       if (m?.[1]) return m[1];
     }
   return undefined;
+};
+
+/** The name a ref's control carries, so a press by ref is checked for danger like a press by name. */
+export const nameOf = (snapshot: string, ref: string): string | undefined =>
+  new RegExp(`- [a-z]+ "([^"]*)" \\[ref=${reEscape(ref)}\\]`).exec(snapshot)?.[1];
+
+/** Secrets never leave the Mac in a model's question: bearer tokens, key=value secrets and long opaque strings. */
+export const redactSecrets = (text: string): string =>
+  text
+    .replace(/Bearer\s+\S+/gi, "Bearer [가림]")
+    .replace(
+      /((?:token|key|secret|password|passwd|cookie|토큰|비밀번호|키)["']?\s*[:=]?\s*["']?)[A-Za-z0-9_\-./+]{16,}/gi,
+      "$1[가림]",
+    )
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[가림]");
+
+const ACTIONABLE =
+  /^\s*- (button|menubutton|popupbutton|checkbox|radiobutton|tab|link|menuitem|textfield|textarea|searchfield|combobox|slider|incrementor) /;
+
+/**
+ * What the model sees of an app: controls it can act on first, then labelled and text lines, each value cut short
+ * and secrets hidden, at most `max` lines. A long list (a notes list) must not push the toolbar out of view.
+ */
+export const modelView = (snapshot: string, max = 250): string => {
+  const lines = snapshot.split("\n").map((l) => redactSecrets(l.replace(/: "([^"]{60})[^"]*"/, ': "$1…"')));
+  const keep = new Set(lines.flatMap((l, i) => (ACTIONABLE.test(l) ? [i] : [])).slice(0, max));
+  for (const [i, l] of lines.entries()) if (keep.size < max && /"|: /.test(l)) keep.add(i);
+  return lines.filter((_, i) => keep.has(i)).join("\n");
 };
 
 /** Whether some control in the snapshot shows the expected value (`…: "42"`). */

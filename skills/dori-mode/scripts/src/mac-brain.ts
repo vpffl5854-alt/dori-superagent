@@ -19,7 +19,7 @@ export type Turn = { readonly act: string; readonly result: string };
 export const DEEPSEEK_FAILS = 2;
 export const SONNET_FAILS = 3;
 export const MAX_TURNS = 15;
-const SNAPSHOT_MAX = 8_000;
+const SNAPSHOT_MAX = 16_000;
 
 /** The owner asked for Sonnet in the request itself ("소넷으로 …"). */
 export const wantsSonnet = (goal: string): boolean => /소넷|sonnet/i.test(goal);
@@ -62,12 +62,13 @@ export const prompt = (
     "",
     "Answer with ONE JSON object and nothing else, one of:",
     '{"do":"open","app":"<app name>"}            open an app in the background (Korean or English name)',
-    '{"do":"look","app":"<app name>"}            read that app\'s controls',
-    '{"do":"press","app":"<app>","step":"<exact control name>"}   press a control by its exact name above',
-    '{"do":"type","app":"<app>","field":"<exact field name>","text":"<text>"}   put text into a field',
+    '{"do":"look","app":"<app name>"}            switch to another app (the app you work in is shown again every turn: never look at it twice)',
+    '{"do":"press","app":"<app>","step":"<exact control name, or its ref like e12 when it has no name>"}',
+    '{"do":"type","app":"<app>","field":"<exact field name, or its ref like e449>","text":"<text>"}   type into a field',
     '{"do":"done","answer":"<one Korean sentence: what was done, and the result the owner asked for>"}',
     '{"do":"fail","reason":"<Korean: why it cannot be done>"}',
-    "Use only names that appear in the controls. Never pay, delete, send or post unless the goal says so.",
+    "Use only names or refs that appear in the controls. Never pay, delete, send or post unless the goal says so.",
+    "Never type into a field that already shows text (it is the owner's own writing) unless the goal says to change it.",
   ].join("\n");
 
 const str = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;

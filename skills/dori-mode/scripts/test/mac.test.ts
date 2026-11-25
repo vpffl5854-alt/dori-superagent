@@ -3,6 +3,9 @@ import { expect, test } from "bun:test";
 import {
   dangerousSteps,
   findRef,
+  modelView,
+  nameOf,
+  redactSecrets,
   findWindow,
   macCallback,
   parseMacPress,
@@ -82,4 +85,27 @@ test("the report says what was pressed and whether the value matched", () => {
     "지금 보이는 값: 41",
     "결과가 기대와 달라요",
   ]);
+});
+
+test("a ref the snapshot shows is a step too, and keeps its name for the danger check", () => {
+  const snap = '- textarea [ref=e449]: ""\n- button "공유" [ref=e467]';
+  expect(findRef(snap, "e449")).toBe("e449");
+  expect(findRef(snap, "e9")).toBeUndefined();
+  expect(nameOf(snap, "e467")).toBe("공유");
+  expect(nameOf(snap, "e449")).toBeUndefined();
+});
+
+test("the model's view puts controls first, cuts long values and hides secrets", () => {
+  const list = Array.from({ length: 30 }, (_, i) => `  - statictext [ref=e${i + 100}]: "메모 ${i}"`);
+  const snap = [
+    ...list,
+    '  - textarea [ref=e449]: "Platform api 키   xpl_d7993a10c63680d01b426084a471150e1ac518a8"',
+    '  - button "새로운 메모" [ref=e459]',
+  ].join("\n");
+  const view = modelView(snap, 3);
+  expect(view).toContain('button "새로운 메모" [ref=e459]');
+  expect(view).toContain("[ref=e449]");
+  expect(view).not.toContain("xpl_d7993a10");
+  expect(view.split("\n")).toHaveLength(3);
+  expect(redactSecrets("token=abcdefghijklmnopqrstuvwx 와 Bearer abc.def")).toBe("token=[가림] 와 Bearer [가림]");
 });
