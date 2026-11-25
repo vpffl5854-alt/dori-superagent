@@ -19,12 +19,13 @@ for d in briefs backlog lanes; do [ -d "$HOME_DIR/$d" ] && cp -R "$HOME_DIR/$d" 
 cp ~/Library/LaunchAgents/com.dori.*.plist "$DEST/LaunchAgents/" 2>/dev/null
 [ -f "$HOME/dori-superagent/HANDOVER.md" ] && cp "$HOME/dori-superagent/HANDOVER.md" "$DEST/repo-local/"
 [ -f "$HOME/.local/bin/dori-skill" ] && cp -L "$HOME/.local/bin/dori-skill" "$DEST/repo-local/"
+[ -f "$HOME/.config/devin/AGENTS.md" ] && cp "$HOME/.config/devin/AGENTS.md" "$DEST/repo-local/devin-AGENTS.md"
 cat > "$DEST/README.md" <<'MD'
 # 슈퍼도리 백업 (비공개)
 Mac 에만 있던 것. 비밀 값(토큰)은 없다 — 다시 발급해서 `~/.dori-superagent/secrets/` 에 넣는다.
 - `dori-home/` → `~/.dori-superagent/` (config.json, decisions.md, roles.json, briefs/, backlog/, lanes/)
 - `LaunchAgents/` → `~/Library/LaunchAgents/` (복구 뒤 `launchctl bootstrap gui/$(id -u) <plist>`)
-- `repo-local/HANDOVER.md` → `~/dori-superagent/HANDOVER.md`, `repo-local/dori-skill` → `~/.local/bin/dori-skill`
+- `repo-local/HANDOVER.md` → `~/dori-superagent/HANDOVER.md`, `repo-local/dori-skill` → `~/.local/bin/dori-skill`, `repo-local/devin-AGENTS.md` → `~/.config/devin/AGENTS.md`
 코드는 vpffl5854-alt/dori-superagent (브랜치 discord-lane-answer).
 MD
 
