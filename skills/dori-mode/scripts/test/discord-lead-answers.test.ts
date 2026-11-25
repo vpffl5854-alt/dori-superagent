@@ -155,3 +155,43 @@ test("the room's pane is found by its name when a restart gave it a new address"
       join(dir, "2026-11-17T10-00-00-000Z_01234567-89ab-cdef-0123-456789abcdef.jsonl"),
     );
   }));
+
+test("a room message quoting code still reaches the lane, with look-alikes for the backtick and $(", () =>
+  withState(async (stateDir) => {
+    const sessionLog = join(stateDir, "lead.jsonl");
+    writeFileSync(sessionLog, "");
+    const delivered: string[] = [];
+    const rts = {
+      for: () => ({
+        list: async () => [{ ref: { runtime: "hc", id: "t74" }, status: "idle" }],
+        deliver: async (_ref: unknown, text: string) => {
+          delivered.push(text);
+          return { kind: "delivered" };
+        },
+        read: async () => "",
+      }),
+    } as unknown as ChosenRuntimes;
+    const { http } = fakeHttp(() => ok({ id: "99" }));
+    const replies = startDiscordReplies(
+      new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
+      stateDir,
+      { ...config(stateDir), leadPane: "hc:t74" },
+      undefined,
+      rts,
+      10,
+    );
+    try {
+      const ok = await replies.enqueue({
+        channel: "c1",
+        messageId: "12",
+        sessionPath: sessionLog,
+        author: "상디",
+        text: "모델은 `deepseek-v4.1` 이고 $(whoami) 는 실행 안 됨",
+      });
+      expect(ok).toBe(true);
+    } finally {
+      replies.stop();
+    }
+    expect(delivered.join("\n")).toContain("모델은 ˋdeepseek-v4.1ˋ 이고 $ (whoami) 는 실행 안 됨");
+    expect(delivered.join("\n")).not.toMatch(/`|\$\(/);
+  }));

@@ -47,6 +47,13 @@ const draftPresent = async (rts: ReturnType<typeof runtimesOf>, ref: SessionRef)
   return box.slice(0, end < 0 ? box.length : end).some((line) => line.trim() !== "");
 };
 
+/**
+ * Room text is typed into the pane, and the pane refuses a backtick or `$(` (typed into a bare shell they would run).
+ * A message carrying either never reached the lane and was dropped without a word (11/23–11/25, mostly bot posts that
+ * quote code). The lane only reads the text, so look-alikes keep it readable: ˋcodeˋ, $ (…).
+ */
+export const forPane = (text: string): string => text.replace(/`/g, "ˋ").replace(/\$\(/g, "$ (");
+
 const handOff = async (
   rts: ReturnType<typeof runtimesOf>,
   ref: SessionRef,
@@ -60,7 +67,7 @@ const handOff = async (
   const status = await agentStatus(rts, ref);
   if (status === undefined || status === "shell" || status === "gone") return false;
   if (await draftPresent(rts, ref)) return false;
-  const body = text?.trim() ? `\n본문: ${text.trim()}` : `\n원문은 위 세션기록에서 읽으세요: ${sessionPath}`;
+  const body = text?.trim() ? `\n본문: ${forPane(text.trim())}` : `\n원문은 위 세션기록에서 읽으세요: ${sessionPath}`;
   // The lane answers differently depending on how the message reached it: a reply or a mention is a direct call to
   // answer, plain room text is not. The distinction is carried here, not inferred from the text body, so a mention
   // that names the bot by its display name still reads as a call.
@@ -70,7 +77,7 @@ const handOff = async (
       ? `\n형식: 맨션(${signal.mentions.join(", ")}을 맨션)`
       : "\n형식: 방 잡담(직접 호출 아님)";
   const prompt =
-    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${author}]`}${body}${signalLine}\n` +
+    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${forPane(author)}]`}${body}${forPane(signalLine)}\n` +
     "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰세요.";
   return (await sendVerified(rts, clock, ref, prompt)) !== "failed";
 };
