@@ -30,6 +30,7 @@ export type GoalDeps = RunOpts & {
   readonly hold: (task: MacTask) => Promise<void>;
   /** The name the Mac shows for an app the model named in English or Korean ("TextEdit" -> "텍스트 편집기"). */
   readonly appName?: (app: string) => Promise<string>;
+  readonly autoSend?: boolean;
 };
 
 export type GoalResult = {

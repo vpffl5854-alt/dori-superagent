@@ -8,6 +8,7 @@ import {
   fieldShowing,
   fieldTexts,
   focusedText,
+  sendOnly,
   sendsField,
   findRef,
   isConsentApp,
@@ -56,6 +57,8 @@ export type ActCtx = RunOpts & {
   readonly windows: () => Promise<Win[]>;
   /** What this task has typed so far: a send chord may only send one of these. */
   readonly typed?: readonly string[];
+  /** Send the task's own message without holding it (MacConfig.autoSend). */
+  readonly autoSend?: boolean;
 };
 /** What an action came to; `end` stops the whole task (held for 도리방, the owner in front, the stop switch). */
 export type ActResult = {
@@ -110,9 +113,14 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
           : act.step;
   // Return sends whatever the focused field holds, which can be the owner's own unsent draft: it is held only when the
   // field shows exactly what this task typed, and the approval says what will go out.
-  const sends = sendsField(step) ? (focusedText(c.snapshot) ?? fieldShowing(c.snapshot, c.typed ?? [])) : undefined;
+  const sends = sendsField(step)
+    ? (focusedText(c.snapshot) ?? fieldShowing(c.snapshot, c.typed ?? []))
+    : sendOnly(step)
+      ? fieldShowing(c.snapshot, c.typed ?? [])
+      : undefined;
+  const own = sends !== undefined && (c.typed ?? []).some((t) => t.trim() === sends);
   const draft = sends ?? fieldTexts(c.snapshot)[0];
-  if (sendsField(step) && (!sends || !(c.typed ?? []).some((t) => t.trim() === sends)))
+  if (sendsField(step) && !own)
     return {
       ok: false,
       result: "",
@@ -123,7 +131,8 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
         held: false,
       },
     };
-  if (dangerousSteps([step]).length || isConsentApp(act.app)) {
+  const sendsNow = Boolean(c.autoSend) && own && sendOnly(step) && !isConsentApp(act.app);
+  if (!sendsNow && (dangerousSteps([step]).length || isConsentApp(act.app))) {
     await c.hold({ app: act.app, steps: [step], ...(sends !== undefined ? { sends } : {}) });
     return {
       ok: false,
@@ -148,6 +157,7 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
   if (!r.ok && (r.note.includes("쓰는 중") || r.note.includes("멈춰")))
     return { ok: false, result: "", end: { text: r.note, held: false } };
   const shown = r.shown.length ? `, 보이는 값: ${r.shown.slice(0, 3).join(", ")}` : "";
+  if (r.ok && sendsNow) return { ok: true, result: `보냈음: "${sends}"` };
   return r.ok
     ? { ok: true, result: `${act.do === "press" ? "눌렀음" : "했음"}${shown}`, step }
     : { ok: false, result: r.note };

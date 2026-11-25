@@ -19,18 +19,26 @@ test("Return and Enter send what the focused field holds; other chords do not", 
 });
 
 /** A chat app whose message field already holds the owner's unsent draft. */
+const sent: string[] = [];
 const chat = (field: string) => {
   const call = async (method: string, params: Record<string, unknown> = {}): Promise<Reply> => {
+    if (method === "keyChord") sent.push(field);
+    if (method === "ax.perform") sent.push(`press:${field}`);
     if (method === "windows") return { result: [{ id: "1", app: "Discord", title: "#일반", focused: false }] };
     if (method === "ax.snapshot")
-      return { result: { text: `- textarea "#일반에 메시지 보내기" [ref=e5]: "${field}"` } };
+      return {
+        result: {
+          text: `- textarea "#일반에 메시지 보내기" [ref=e5]: "${field}"\n- button "보내기" [ref=e6]\n- button "삭제" [ref=e7]`,
+        },
+      };
     if (method === "ax.typeText") field = String(params["text"]);
     if (method === "menus.items") return { result: [] };
     return { result: {} };
   };
   return { call, close: async () => undefined } as Engine;
 };
-const deps = (answers: string[], held: MacTask[]): GoalDeps => ({
+const deps = (answers: string[], held: MacTask[], autoSend = false): GoalDeps => ({
+  autoSend,
   stopped: () => false,
   sleep: async () => undefined,
   waitMs: 1,
@@ -74,4 +82,44 @@ test("Return after the task typed into an empty field is held with the text it s
   );
   expect(r.held).toBe(true);
   expect(held).toEqual([{ app: "Discord", steps: ["key:return"], sends: "테스트" }]);
+});
+
+const TYPE = '{"do":"type","app":"Discord","field":"#일반에 메시지 보내기","text":"테스트"}';
+
+test("with autoSend the task's own message goes out at once, by Return or by a 보내기 button", async () => {
+  for (const send of [
+    '{"do":"key","app":"Discord","keys":["return"]}',
+    '{"do":"press","app":"Discord","step":"보내기"}',
+  ]) {
+    sent.length = 0;
+    const held: MacTask[] = [];
+    const r = await runGoal(
+      chat(""),
+      "일반에 테스트 보내",
+      deps([PLAN, '{"do":"look","app":"Discord"}', TYPE, send, '{"do":"done","answer":"보냈어요"}'], held, true),
+    );
+    expect(r.ok).toBe(true);
+    expect(held).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(r.history.some((h) => h.result === '보냈음: "테스트"')).toBe(true);
+  }
+});
+
+test("with autoSend a delete is still held, and the owner's draft is still never sent", async () => {
+  sent.length = 0;
+  const held: MacTask[] = [];
+  const del = await runGoal(
+    chat(""),
+    "지워",
+    deps([PLAN, '{"do":"look","app":"Discord"}', TYPE, '{"do":"press","app":"Discord","step":"삭제"}'], held, true),
+  );
+  expect(del.held).toBe(true);
+  expect(held).toEqual([{ app: "Discord", steps: ["삭제"] }]);
+  const draft = await runGoal(
+    chat("지브 초안"),
+    "보내",
+    deps([PLAN, '{"do":"look","app":"Discord"}', '{"do":"press","app":"Discord","step":"보내기"}'], [], true),
+  );
+  expect(draft.held).toBe(true);
+  expect(sent).toEqual([]);
 });

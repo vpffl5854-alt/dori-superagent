@@ -136,6 +136,7 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
       think: (tier, p) => ask(tier, c.think ?? {}, p, run, macDir(config)),
       openApp: async (app) => void (await openApp(app)),
       appName: shownAppName,
+      autoSend: c.autoSend ?? false,
       hold: async (task) => void (await submit(config, task, true)),
     });
     if (g.ok && g.recipe)

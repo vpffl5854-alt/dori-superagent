@@ -185,6 +185,14 @@ export const fieldTexts = (snapshot: string): string[] =>
 /** A chord that sends what the focused field holds: Return or Enter, with or without cmd. */
 export const sendsField = (step: string): boolean => /^key:(cmd\+)?(return|enter)$/i.test(step);
 
+const SEND_WORDS = /보내기|전송|\bsend\b/gi;
+/** A step that only sends a message: a send chord, or a send button whose name names nothing else dangerous. */
+export const sendOnly = (step: string): boolean =>
+  sendsField(step) ||
+  (parseStep(step).kind === "press" &&
+    new RegExp(SEND_WORDS.source, "i").test(step) &&
+    !DANGER.test(step.replace(SEND_WORDS, "")));
+
 /** The text of the focused text field in a snapshot, or undefined when no text field has focus. */
 export const focusedText = (snapshot: string): string | undefined => {
   const line = snapshot.split("\n").find((l) => FIELD.test(l) && l.includes("(focused)"));

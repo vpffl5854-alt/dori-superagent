@@ -20,6 +20,11 @@ export type MacConfig = {
   readonly maxWaits?: number;
   /** The models the head asks (mac-think.ts). */
   readonly think?: ThinkConfig;
+  /**
+   * A request's own message goes out without the 진행 button: a send (Return or a 보내기 button) whose field shows exactly
+   * what the task typed. Pay, delete, post and upload are still held (지브 결정 2026-11-26).
+   */
+  readonly autoSend?: boolean;
 };
 type TaskJob = { readonly id: string; readonly task: MacTask; readonly send: boolean };
 /** A queued job is a task with its steps, or a spoken request the head works out (mac-do.ts). */
