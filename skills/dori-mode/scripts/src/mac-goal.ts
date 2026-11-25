@@ -57,6 +57,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
   const tiers: Tier[] = [tier];
   const history: Turn[] = [];
   const steps: { app: string; step: string }[] = [];
+  const typed: string[] = [];
   let replayable = true;
   let fails = 0;
   let app: string | undefined;
@@ -162,7 +163,8 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
     }
     if (act.do === "look" || act.do === "open" || act.app !== app) title = act.do === "look" ? act.window : undefined;
     app = act.app;
-    const r = await doAct(e, act, { ...d, wins, ...(w ? { shown: w } : {}), snapshot, windows });
+    const r = await doAct(e, act, { ...d, wins, ...(w ? { shown: w } : {}), snapshot, windows, typed });
+    if (r.ok && act.do === "type") typed.push(act.text);
     if (r.end) return finish(false, r.end.text, r.end.held);
     history.push({ act: actLine(act) + look, result: r.result });
     // Only what worked is learned: a failed step in the recipe would fail every replay.

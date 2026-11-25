@@ -10,6 +10,8 @@ export type MacTask = {
   readonly steps: readonly string[];
   readonly expect?: string;
   readonly window?: string;
+  /** For a send chord (Return): the text it sends, shown on the approval. */
+  readonly sends?: string;
 };
 
 /** Words on a control whose press cannot be taken back. "지우기" (clear) is not one: it only clears a field. */
@@ -162,7 +164,32 @@ export const approvalText = (id: string, t: MacTask, danger: readonly string[]):
     `앱: ${t.app}`,
     `누를 순서: ${t.steps.join(" → ")}`,
     `되돌릴 수 없는 버튼: ${danger.join(", ")}`,
+    ...(t.sends !== undefined ? [`보낼 글: "${t.sends}"`] : []),
   ].join("\n");
+
+const FIELD = /^\s*- (textarea|textfield|searchfield|combobox)\b/;
+const clean = (v: string): string => v.replace(/[\u200b\ufeff]/g, "").trim();
+
+/** With no focused field (Electron apps often mark none): the text of a field showing exactly one of these texts. */
+export const fieldShowing = (snapshot: string, texts: readonly string[]): string | undefined =>
+  fieldTexts(snapshot).find((v) => texts.some((t) => t.trim() === v));
+
+/** The non-empty texts the snapshot's text fields show. */
+export const fieldTexts = (snapshot: string): string[] =>
+  snapshot
+    .split("\n")
+    .filter((l) => FIELD.test(l))
+    .map((l) => clean(/\]: "(.*)"/.exec(l)?.[1] ?? ""))
+    .filter(Boolean);
+
+/** A chord that sends what the focused field holds: Return or Enter, with or without cmd. */
+export const sendsField = (step: string): boolean => /^key:(cmd\+)?(return|enter)$/i.test(step);
+
+/** The text of the focused text field in a snapshot, or undefined when no text field has focus. */
+export const focusedText = (snapshot: string): string | undefined => {
+  const line = snapshot.split("\n").find((l) => FIELD.test(l) && l.includes("(focused)"));
+  return line === undefined ? undefined : clean(/: "(.*)" \(focused\)\s*$/.exec(line)?.[1] ?? "");
+};
 
 export const reportText = (t: MacTask, ok: boolean, shown: readonly string[], note = ""): string =>
   [

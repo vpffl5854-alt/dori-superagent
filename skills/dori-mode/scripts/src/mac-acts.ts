@@ -5,6 +5,10 @@
 import type { Act } from "./mac-brain.ts";
 import {
   dangerousSteps,
+  fieldShowing,
+  fieldTexts,
+  focusedText,
+  sendsField,
   findRef,
   isConsentApp,
   findWindow,
@@ -50,6 +54,8 @@ export type ActCtx = RunOpts & {
   readonly shown?: Win;
   readonly snapshot: string;
   readonly windows: () => Promise<Win[]>;
+  /** What this task has typed so far: a send chord may only send one of these. */
+  readonly typed?: readonly string[];
 };
 /** What an action came to; `end` stops the whole task (held for 도리방, the owner in front, the stop switch). */
 export type ActResult = {
@@ -102,8 +108,23 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
         : /^e\d+$/.test(act.step)
           ? (nameOf(c.snapshot, act.step) ?? act.step)
           : act.step;
+  // Return sends whatever the focused field holds, which can be the owner's own unsent draft: it is held only when the
+  // field shows exactly what this task typed, and the approval says what will go out.
+  const sends = sendsField(step) ? (focusedText(c.snapshot) ?? fieldShowing(c.snapshot, c.typed ?? [])) : undefined;
+  const draft = sends ?? fieldTexts(c.snapshot)[0];
+  if (sendsField(step) && (!sends || !(c.typed ?? []).some((t) => t.trim() === sends)))
+    return {
+      ok: false,
+      result: "",
+      end: {
+        text: draft
+          ? `입력 칸에 내가 쓰지 않은 글("${draft.slice(0, 40)}")이 있어서 보내지 않았어요`
+          : "보낼 글이 든 입력 칸을 못 찾아서 보내지 않았어요",
+        held: false,
+      },
+    };
   if (dangerousSteps([step]).length || isConsentApp(act.app)) {
-    await c.hold({ app: act.app, steps: [step] });
+    await c.hold({ app: act.app, steps: [step], ...(sends !== undefined ? { sends } : {}) });
     return {
       ok: false,
       result: "승인 대기",
