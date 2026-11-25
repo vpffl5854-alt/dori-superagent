@@ -21,6 +21,8 @@ Needs: bun 1.3+, herdr or hc, git, and the GitHub CLI (`gh`) for `merged`/`close
 | Field | Default | Used by |
 |---|---|---|
 | `runtime` | detected | every command that opens or reads a session: `"herdr"` or `"hc"`. Unset, the Dori picks hc inside an hc terminal (`HC_TERMINAL_ID`), herdr inside a herdr pane (`HERDR_PANE_ID`), else hc when it is on PATH, else herdr, and refuses only when neither is there. Lanes already open stay on the runtime that opened them |
+| `laneRuntime` | `runtime` | `launch`: where new lanes open, `"herdr"`, `"hc"` or `"omo-host"`. `omo-host` opens each lane as a session of omo's shared engine host (one process per machine, a few MB per idle lane) instead of a TUI omo in a terminal; `runtime` never takes `omo-host`. Such a lane has no terminal: `dori attach` opens a view, and its env (`DORI_CONFIG`, the token-file variables) rides in the dori commands its footer names |
+| `leadRuntime` | `runtime` | `launch`, `boot`: where the lead session lives, `"herdr"`, `"hc"` or `"omo-host"`; a lane's footer names how it reaches the lead by this kind, and `boot` prints `LEAD_RUNTIME <kind> (from config)`. `dori up` does not read it |
 | `stateDir` | `~/.dori/state` | registry, heavy slots |
 | `laneWorkspace` | current workspace | `launch`: the herdr workspace, or on hc the `dori.group` label (default `dori`) |
 | `workspaces` | all | `sync`, `dead-panes`: herdr workspaces, or `dori.group` labels on hc |
@@ -32,7 +34,7 @@ Needs: bun 1.3+, herdr or hc, git, and the GitHub CLI (`gh`) for `merged`/`close
 | `sessionsDir` | `~/.omo/agent/sessions` | session-id lookup |
 | `nudgeAfterMin`, `postAfterMin` | 15, 20 | `freshness` |
 | `closeAfterMin` | 5 | `watch` |
-| `heavySlots`, `heavyMaxLoad` | 1, 80 | `heavy` |
+| `heavyMinSlots`, `heavyMaxSlots`, `heavyJobMemGb`, `heavyMaxLoad` | 1, 4, 4, 80 | `heavy` (the old `heavySlots` is read as `heavyMaxSlots`) |
 | `deadPanePatterns` | `has stopped`, `no suitable jobs` | `dead-panes` |
 | `guard` | load 150/80, 20% memory, 50 GB disk, 20 panes | `guard` |
 | `hooks.threadReply`, `hooks.threadDone` | none | `freshness`, `close` |
@@ -72,6 +74,10 @@ The lane never gets the Slack token itself: on hc every env value is a command-l
 
 ### `dori adopt <key> --pane ID --title T --brief FILE --done "..." [--thread REF]`
 Registers a lane that is already running. A `--pane` id without a runtime prefix (`hc:`, `herdr:`) or the herdr `w1:p3` shape is recorded on the runtime new lanes open on, the one `dori boot` prints as `RUNTIME`.
+
+### `dori attach <key> [--print]`
+
+A view of an `omo-host` lane: an hc terminal (labelled `dori.view=<key>`, removed when the client quits) running omo's TUI client attached to the lane's host session, `omo --attach unix://<socket> --session <id>`. Quitting the client leaves the lane running. `--print` prints that command instead, for any terminal. Refused for a lane on herdr or hc, whose own pane is the view. While a view is attached the host keeps the session: `close` stops its turn and its receipt says `not closed`; quit the view, then `omo host session close <id>`. A view whose client exits on its own (the host re-opened the session under a new handle) is simply attached again.
 
 ### `dori sync [--write]`
 Prints `key | thread | pane | session | status` for every open lane and every unregistered agent pane, followed by drift. Read-only unless `--write`, which stores session ids.
@@ -255,4 +261,4 @@ Prints `INBOUND <source> <chat> <thread> <update-id> mid=<message_id> <from> <te
 Runs `hooks.transcribe` and prints the transcript. A failed or empty transcription is an error, never an empty message.
 
 ### `dori heavy <label> -- <command ...>`
-Waits until load is under `heavyMaxLoad` and one of `heavySlots` is free, then runs the command and frees the slot when it exits. A slot held by a process that no longer exists (or a zombie) is taken over. Use it for full builds and test suites. Installs, focused tests and git do not need it.
+Waits for a slot under the dynamic limit, then runs the command and frees the slot when it exits. The limit is the running jobs plus as many `heavyJobMemGb` jobs as fit in free memory above `guard.memFreeMinPct` (jobs started in the last 2 minutes are reserved at that estimate), no new job while load is at or over `heavyMaxLoad`, and always between `heavyMinSlots` and `heavyMaxSlots`: the floor runs even under high load or low memory (set `heavyMinSlots: 0` to gate every job on load). A lower limit never stops a running job; it only holds new ones. While waiting it prints `HEAVY_WAIT <label> limit N of MIN-MAX (memory|load|floor|ceiling), ...` to stderr each time the decision changes, and `HEAVY_START` when it runs. `dori heavy --status` prints the current limit, its reason and the held slots. A slot held by a process that no longer exists (or a zombie) is taken over. Use it for full builds and test suites. Installs, focused tests and git do not need it.

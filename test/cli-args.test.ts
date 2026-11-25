@@ -23,6 +23,14 @@ test("boolean flags still need no value, and a value flag still takes the next a
   expect(parse(["send", "lead", "--text", "--to-shell"]).flags.get("text")).toEqual(["--to-shell"]);
 });
 
+test("--name=value is that flag with that value, so it never swallows the next argument", () => {
+  const a = parse(["loop", "--interval=60", "--once"]);
+  expect(a.flags.get("interval")).toEqual(["60"]);
+  expect(a.flags.get("once")).toEqual(["true"]);
+  expect(parse(["send", "lead", "--text=a=b"]).flags.get("text")).toEqual(["a=b"]);
+  expect(() => parse(["duty", "--once=false"])).toThrow("--once takes no value");
+});
+
 test("--help before a command prints the usage and runs nothing", async () => {
   const { w, d } = setup();
   const before = w.calls.length;

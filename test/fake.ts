@@ -6,7 +6,7 @@ import type { Exec } from "../src/runtime/exec.ts";
 import { HcRuntime } from "../src/runtime/hc/index.ts";
 import { HerdrRuntime } from "../src/runtime/herdr/index.ts";
 import { Runtimes } from "../src/runtime/registry.ts";
-import type { AgentStatus, RuntimeKind, SessionRef } from "../src/runtime/types.ts";
+import type { AgentStatus, SessionRef, TerminalKind } from "../src/runtime/types.ts";
 import { Store, type HostLoad } from "../src/store.ts";
 import type { DutyCounts, TelemetryEvent, Usage } from "../src/telemetry.ts";
 import { FakeHc } from "./fake-hc.ts";
@@ -49,7 +49,10 @@ export class World {
   onHookKill: (() => void) | undefined;
   /** number of upcoming `pane send-keys` calls that fail (exit 1) */
   keyFails = 0;
-  gh: (argv: readonly string[]) => { code: number; stdout: string } = () => ({ code: 1, stdout: "" });
+  gh: (argv: readonly string[]) => { code: number; stdout: string; stderr?: string } = () => ({
+    code: 1,
+    stdout: "",
+  });
   usage: TelemetryEvent[] = [];
   dutyCounts: DutyCounts[] = [];
   touches = 0;
@@ -93,7 +96,7 @@ export class World {
       await Promise.race([this.hang, kill]);
       if (killed) return { code: 143, stdout: "", stderr: "terminated" };
     }
-    if (cmd === "gh") return { ...this.gh(argv), stderr: "" };
+    if (cmd === "gh") return { stderr: "", ...this.gh(argv) };
     if (cmd === "hc") return this.hc.exec(cmd, argv);
     if (cmd !== "herdr") return { stderr: "", ...this.reviewer(argv) };
     const ok = (result: unknown) => ({ code: 0, stdout: JSON.stringify({ result }), stderr: "" });
@@ -166,7 +169,7 @@ export class World {
   };
 
   /** Deps over this world's recorders; `runtime` is the selected one (both are reachable by ref). */
-  deps(opts: { runtime?: RuntimeKind } = {}): Deps {
+  deps(opts: { runtime?: TerminalKind } = {}): Deps {
     const kind = opts.runtime ?? "herdr";
     const quiet = { env: {}, sleep: async () => {} };
     return {

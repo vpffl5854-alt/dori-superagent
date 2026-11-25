@@ -134,6 +134,9 @@ export const depsFor = (w: World, clock: Clock, stateDir: string, patch: Partial
   const config: DoriConfig = {
     ...defaultConfig("/home/test"),
     stateDir,
+    // Inside the test's own directory: on macOS /home is an autofs mount, and each goal-record lookup under it costs
+    // about 40 ms, which pushed the launch wait loop past the 5 s test timeout.
+    sessionsDir: join(stateDir, "sessions"),
     defaultCwd: "/repo",
     leadPane: "lead:p1",
     runtime: "herdr",

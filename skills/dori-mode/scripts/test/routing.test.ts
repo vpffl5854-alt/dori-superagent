@@ -46,3 +46,8 @@ test("an unknown session count (-1) holds the launch", () => {
   expect(canLaunch({ ...roomy, panes: -1 }, t)).toEqual({ ok: false, reasons: ["session count unknown"] });
   expect(canLaunch({ ...roomy, panes: -1 }, { ...t, panesMax: 0 }).ok).toBe(true);
 });
+
+test("a fractional free memory just under the threshold is reported with its decimal, not rounded up to it", () => {
+  const t = { loadAlert: 150, loadOk: 80, memFreeMinPct: 15, diskFreeMinGb: 50, panesMax: 20 };
+  expect(canLaunch({ ...roomy, memFreePct: 14.697 }, t).reasons).toEqual(["memory free 14.7% < 15%"]);
+});

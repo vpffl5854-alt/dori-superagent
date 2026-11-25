@@ -1,13 +1,13 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { AGENT_SESSION_KINDS, type SessionRef } from "../../../../src/runtime/types.ts";
 import { type ChosenRuntimes, type Runner, runtimesFor } from "./run.ts";
 
 export type Proc = { readonly pid: number; readonly ppid: number; readonly cmd: string };
 export type SessionHit = {
   readonly id: string;
-  readonly via: "argv" | "child-env" | "start-time" | "none";
+  readonly via: "argv" | "child-env" | "start-time" | "runtime" | "none";
   readonly pid?: number;
 };
 
@@ -16,13 +16,17 @@ const ENV_ID = /(?:^|\s)PI_SESSION_ID=([0-9a-f-]{36})(?:\s|$)/;
 const SESSION_FILE = /^(\d{4}-\d\d-\d\dT\d\d)-(\d\d)-(\d\d)-(\d{3})Z_([0-9a-f-]{36})\.jsonl$/;
 const START_WINDOW_MS = 180_000;
 
-export const procTable = async (run: Runner): Promise<Proc[]> =>
-  (await run(["ps", "-A", "-o", "pid=,ppid=,command="])).out.split("\n").flatMap((line) => {
+export const PS_ARGV = ["ps", "-A", "-o", "pid=,ppid=,command="] as const;
+
+export const parseProcs = (out: string): Proc[] =>
+  out.split("\n").flatMap((line) => {
     const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), cmd: m[3] ?? "" }] : [];
   });
 
-const descendants = (table: readonly Proc[], root: number): Proc[] => {
+export const procTable = async (run: Runner): Promise<Proc[]> => parseProcs((await run(PS_ARGV)).out);
+
+export const descendants = (table: readonly Proc[], root: number): Proc[] => {
   const byParent = new Map<number, Proc[]>();
   for (const p of table) byParent.set(p.ppid, [...(byParent.get(p.ppid) ?? []), p]);
   const out: Proc[] = [];
@@ -68,6 +72,8 @@ export const resolveSession = async (
   table: readonly Proc[],
   deps: SessionDeps,
 ): Promise<SessionHit> => {
+  // An agent session's ref is its omo session id: no process to search.
+  if (AGENT_SESSION_KINDS.has(ref.runtime)) return { id: ref.id, via: "runtime" };
   const rootPid = await rootPidOf(ref, deps);
   // The root itself is a candidate: an agent run directly as the session's program has no shell above it.
   const candidates = rootPid ? [...table.filter((p) => p.pid === rootPid), ...descendants(table, rootPid)] : [];

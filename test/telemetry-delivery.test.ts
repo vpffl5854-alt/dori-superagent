@@ -4,51 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Telemetry } from "../src/telemetry.ts";
 import { rejectedRecords } from "../src/telemetry-otlp.ts";
-
-type Sent = { url: string; body: string; headers: Record<string, string> };
-
-function rig(
-  env: Record<string, string> = {},
-  logsStatus: () => number = () => 200,
-  registerStatus: () => number = () => 200,
-  logsText: () => string = () => "",
-) {
-  const home = mkdtempSync(join(tmpdir(), "dori-tel-"));
-  const sent: Sent[] = [];
-  const notices: string[] = [];
-  let clock = Date.parse("2026-11-02T10:00:00Z");
-  let minted = 0;
-  const t = new Telemetry(
-    home,
-    env,
-    async (url, body, headers) => {
-      sent.push({ url, body, headers });
-      if (url.endsWith("/v1/register"))
-        return { status: registerStatus(), text: JSON.stringify({ key: `install-key-${++minted}` }) };
-      return { status: logsStatus(), text: logsText() };
-    },
-    () => clock,
-    (s) => notices.push(s),
-  );
-  const logs = () => sent.filter((s) => s.url.endsWith("/v1/logs"));
-  const registers = () => sent.filter((s) => s.url.endsWith("/v1/register"));
-  const names = () =>
-    logs().flatMap((s) =>
-      JSON.parse(s.body).resourceLogs[0].scopeLogs[0].logRecords.map((r: { eventName: string }) => r.eventName),
-    );
-  return {
-    home,
-    t,
-    sent,
-    logs,
-    registers,
-    notices,
-    names,
-    advance: (ms: number) => {
-      clock += ms;
-    },
-  };
-}
+import { rig } from "./telemetry-rig.ts";
 
 describe("telemetry", () => {
   test("records refused inside a 200 response (partialSuccess.rejectedLogRecords) are counted, not treated as delivered", async () => {

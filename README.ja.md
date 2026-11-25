@@ -166,17 +166,21 @@ hcにはワークスペースもタブもありません。Doriはセッショ�
 
 ### 10分、20分、40分の促し
 
-10分間報告がなく、ペインも作業中でないレーンには、ペインに `prompts/nudge.md` が送られます。20分でもう一度送られ、40分になると当番ループがリードに `[ESCALATE <key>]` を送ります。`--status waiting` を報告したレーンや、ペインが `blocked` のレーンには手を出しません。
+10分間報告がなく、ペインも作業中でないレーンには、ペインに `prompts/nudge.md` が送られます。20分でもう一度送られ、40分になると当番ループがリードに `[ESCALATE <key>]` を送ります。`--status waiting` を報告したレーンには手を出しません。
+
+`blocked` か `error` のまま止まっているペインには入力が届かないので、自力では動き出しません。10分経つと当番ループはその停止について一度だけリードに `[STUCK <key>]` を送り、ペインには何も入力しません。ペインが別の状態に戻れば、次の停止はまた報告されます。
 
 ### マージには正確なheadでのCLEARレシートと緑のチェックが必要
 
-`dori merge` は `gh` でPRのhead SHAを読み、そのSHAに対する判定 `CLEAR` のレシート（receipt）が `~/.dori/receipts/` にあることを求めます。レシートを書くのは `dori review` だけです。`dori review` はそのSHAに固定した新しい非対話のomoを `prompts/review.md` で実行し、レビュアーが `VERDICT:` 行を出力しなければレシートは書かれません。
+`dori merge` は `gh` でPRのhead SHAを読み、そのSHAに対する判定 `CLEAR` のレシート（receipt）が `~/.dori/receipts/` にあることを求めます。レシートを書くのは `dori review` だけです。`dori review` はそのSHAに固定した新しい非対話のomoを `prompts/review.md` で実行します。レビューは開始前にそのSHAの以前のレシートを削除し、`CLEAR` または `BLOCK` を返したときだけ新しいレシートを書きます。判定として数えるのは、行頭から始まる `VERDICT: CLEAR` または `VERDICT: BLOCK` の行（行末に短い理由を書いてもよい）か、その行全体を markdown 強調やバッククォートで包んだ行です。レビュアーがどちらも出力しなければレシートは書かれません。インデント・箇条書き記号・引用・フェンス内の例は無効で、通常の行と強調行の判定が食い違う場合はレシートを書きません。そのSHAでレビューまたはマージが進行中の間、`dori merge` は古いレシートを使わずに拒否します。
 
 次に、`gh pr checks` が少なくとも1つのチェックを返し、すべてのチェックが `pass` か `skipping` で、少なくとも1つが `pass` である必要があります。チェック一覧が空なら "an empty check list is never green" として拒否されます。レビュー後にプッシュするとhead SHAが変わるので、レシートが一致しなくなり、`dori review` をもう一度実行する必要があります。
 
+フォーク PR の `pull_request` ワークフローは、メンテナの承認待ちになるほか、起動に失敗したりキャンセルされたりしても check run を残さないため、`gh pr checks` には現れず、`pass`/`skipping` だけの一覧では見落とします。そこで `dori merge` は正確な head の `pull_request` 実行も読み取り（`gh api repos/<owner>/<repo>/actions/runs?head_sha=<head>&event=pull_request`）、どのワークフローも最新の実行が `success`・`skipped`・`neutral` として完了していなければマージを拒否します: `MERGE_REFUSED pull_request workflow run(s) not green at head <sha>: ci=action_required`。ワークフローごとに最新の実行だけを数えるので、PR を開き直したときの古いキャンセル済み・stale 実行はブロックせず、別の head や別イベント（`push`、`pull_request_target`）の実行もブロックしません。実行を取得できない場合（Actions の読み取り権限がないプライベートリポジトリ、Actions 無効、応答の切り詰めや破損）は、緑とみなさずマージを拒否します。拒否は原因（`Actions status unavailable (permission denied or Actions disabled)`）を示し、ワークフローの状態を確認できるまでマージは拒否されたままです。Actions の読み取り権限を持つ資格情報か、リポジトリの Actions 設定が出口であり、回避策ではありません。`--dry-run` も同じチェックを通ります。
+
 ### 自前のツール用のフック
 
-`$DORI_HOME/config.json` の `hooks` 以下に、argvテンプレートを指定できます。`onReady`、`onReport`、`onLost` はそれぞれのイベントでバックグラウンド実行され、引数ごとに `{key}`、`{text}`、`{evidence}` が埋め込まれます。`reviewCommand` は、同じ `VERDICT:` 行を出力する限り、組み込みのレビュアーの代わりになります。`DORI_PROMPTS_DIR` を使うと、ハーネスが自分用にコピーしたプロンプトを使うようになります。
+`$DORI_HOME/config.json` の `hooks` 以下に、argvテンプレートを指定できます。`onReady`、`onReport`、`onLost` はそれぞれのイベントでバックグラウンド実行され、引数ごとに `{key}`、`{text}`、`{evidence}` が埋め込まれます。`reviewCommand` は、同じ行頭の `VERDICT: CLEAR` または `VERDICT: BLOCK` 行（行末の理由可）、または強調で包んだ整行を出力する限り、組み込みのレビュアーの代わりになります。`DORI_PROMPTS_DIR` を使うと、ハーネスが自分用にコピーしたプロンプトを使うようになります。
 
 ## Dori modeの詳細
 
@@ -275,7 +279,7 @@ doriはomoと同じ方法で匿名の利用カウントを送ります。OTLP/HT
 | `dori.lane_ready` | `dori ready` | `evidence_count`, `lane_minutes` |
 | `dori.review_completed` | `dori review` | `verdict`: `CLEAR` または `BLOCK` |
 | `dori.merge_decided` | `--dry-run` なしの `dori merge` | `outcome` |
-| `dori.duty_summary` | 当番ループから、最大で1時間に1回 | `ticks`, `flushed`, `nudges`, `escalations`, `lost` |
+| `dori.duty_summary` | 当番ループから、最大で1時間に1回 | `ticks`, `flushed`, `nudges`, `escalations`, `lost`, `stuck` |
 
 どのレコードにも、サービス名とバージョン、インストールハッシュ、CIフラグ、OSの種類とバージョン、CPUアーキテクチャが含まれます。パス、リポジトリ名、PR番号、レーンキー、ブリーフ、メッセージ、その他のテキストは一切送りません。コマンドが送信を待つのは最大2秒で、テレメトリーの失敗でコマンドが失敗することはありません。
 

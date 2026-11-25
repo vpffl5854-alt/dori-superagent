@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 import { launchLane } from "../src/launch.ts";
 import { depsFor, fakeClock, newWorld, withState, type World } from "./fakes.ts";
@@ -83,4 +83,43 @@ test("a narrow pane that cuts the goal footer short reads STARTUP_OK when the la
   expect(await launch("stale-lane")).toStartWith("STARTUP_NO_GOAL stale-lane w:p9");
   // Another lane's active goal in the same cwd is not this lane's goal.
   expect(await launch("narrow")).toStartWith("STARTUP_NO_GOAL narrow w:p9");
+});
+
+test("launch opens the lane with DORI_CONFIG and DORI_STATE_DIR of this home, so its reports land here (#197)", async () => {
+  const home = join(state.dir, "second-home");
+  const brief = join(state.dir, "brief.md");
+  writeFileSync(brief, "# brief\n");
+  const before = process.env["DORI_CONFIG"];
+  process.env["DORI_CONFIG"] = join(home, "config.json");
+  try {
+    const deps = depsFor(world, fakeClock(T0), join(home, "state"), { runtime: "hc" });
+    await launchLane(deps, { key: "env-lane", title: "t", brief, done: "closed acme/app#3" });
+  } finally {
+    if (before === undefined) delete process.env["DORI_CONFIG"];
+    else process.env["DORI_CONFIG"] = before;
+  }
+  const create = world.calls.find((c) => c[0] === "hc" && c[2] === "run") ?? [];
+  const env = create.slice(create.indexOf("env") + 1);
+  expect(env.some((arg) => arg.startsWith("DORI_CONFIG="))).toBe(false);
+  expect(env).toContain(`DORI_STATE_DIR=${join(home, "state")}`);
+});
+
+test("a relative DORI_CONFIG or state dir reaches the lane as this launcher's absolute path, not the lane cwd's (#197)", async () => {
+  const brief = join(state.dir, "brief.md");
+  writeFileSync(brief, "# brief\n");
+  const before = process.env["DORI_CONFIG"];
+  const relConfig = relative(process.cwd(), join(state.dir, "rel-home", "config.json"));
+  const relState = relative(process.cwd(), join(state.dir, "rel-home", "state"));
+  process.env["DORI_CONFIG"] = relConfig;
+  try {
+    const deps = depsFor(world, fakeClock(T0), relState, { runtime: "hc" });
+    await launchLane(deps, { key: "rel-lane", title: "t", brief, done: "closed acme/app#3" });
+  } finally {
+    if (before === undefined) delete process.env["DORI_CONFIG"];
+    else process.env["DORI_CONFIG"] = before;
+  }
+  const create = world.calls.findLast((c) => c[0] === "hc" && c[2] === "run") ?? [];
+  const env = create.slice(create.indexOf("env") + 1);
+  expect(env).toContain(`DORI_CONFIG=${process.cwd()}${sep}${relConfig}`);
+  expect(env).toContain(`DORI_STATE_DIR=${resolve(relState)}`);
 });

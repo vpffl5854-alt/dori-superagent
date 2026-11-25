@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { dutyTick } from "../src/duty.ts";
 import { Refusal } from "../src/refusal.ts";
 import { send } from "../src/inbox.ts";
-import { parseRef, type RuntimeKind } from "../src/runtime/types.ts";
+import { parseRef, type TerminalKind } from "../src/runtime/types.ts";
 import { terminal } from "./fake-hc.ts";
 import { World } from "./fake.ts";
 
 type State = "idle" | "working" | "shell" | "gone";
 
 /** One session in the given state on either runtime, and what reached it. */
-function rig(kind: RuntimeKind) {
+function rig(kind: TerminalKind) {
   const w = new World();
   const d = w.deps({ runtime: kind });
   const place = (state: State): { target: string; set: (s: State) => void; received: () => string[] } => {

@@ -11,8 +11,28 @@ import { isOn, OS_TYPE, otlpLogs, rejectedRecords } from "./telemetry-otlp.ts";
 
 const HOUR_MS = 3_600_000;
 
-export type MergeOutcome = "merged" | "no_receipt" | "review_block" | "no_checks" | "checks_red" | "checks_all_skipped";
-export type DutyCounts = { ticks: number; flushed: number; nudges: number; escalations: number; lost: number };
+export type MergeOutcome =
+  | "merged"
+  | "no_receipt"
+  | "review_block"
+  | "review_in_progress"
+  | "no_checks"
+  | "checks_red"
+  | "checks_all_skipped"
+  | "workflow_pending"
+  | "workflow_status_unknown";
+
+/**
+ * The counters a duty summary carries. The list is the type, so a counter cannot be added to one and not the other.
+ */
+const DUTY_KEYS = ["ticks", "flushed", "nudges", "escalations", "lost", "stuck"] as const;
+export type DutyCounts = { [K in (typeof DUTY_KEYS)[number]]: number };
+
+/** Every counter at zero: a stored bucket from an older version is completed from this before it is summed into. */
+const ZERO: DutyCounts = { ticks: 0, flushed: 0, nudges: 0, escalations: 0, lost: 0, stuck: 0 };
+
+/** A counter read back from a stored bucket: absent before it existed, and `null` if a broken build ever stored NaN. */
+const counter = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
 export type TelemetryEvent =
   | { name: "dori.installed" }
@@ -50,7 +70,8 @@ type State = {
   noticeShown?: boolean;
   installedSent?: boolean;
   lastActiveDay?: string;
-  duty?: DutyCounts & { since: number };
+  /** Partial, because a bucket written before a counter existed has no key for it: read it through `counter()`. */
+  duty?: Partial<DutyCounts> & { since: number };
 };
 
 const fetchSender: Sender = async (url, body, headers) => {
@@ -144,8 +165,11 @@ export class Telemetry implements Usage {
     this.enqueue(async () => {
       const state = this.load();
       const now = this.now();
-      const acc = state.duty ?? { ticks: 0, flushed: 0, nudges: 0, escalations: 0, lost: 0, since: now };
-      for (const k of ["ticks", "flushed", "nudges", "escalations", "lost"] as const) acc[k] += counts[k];
+      // A bucket written before a counter existed has no key for it, and `??` would not fill the gap: the object is
+      // not nullish. Every counter is normalized before summing, so an upgrade neither drops the first sum nor emits
+      // `intValue: "NaN"`.
+      const acc = { ...ZERO, since: state.duty?.since ?? now };
+      for (const k of DUTY_KEYS) acc[k] = counter(state.duty?.[k]) + counter(counts[k]);
       if (now - acc.since < HOUR_MS) {
         state.duty = acc;
         this.save(state);

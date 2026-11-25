@@ -5,6 +5,8 @@ import { type HerdrCli, reasonOf, ToolError } from "./exec.ts";
 const INPUT_RULE = /^─{10,}$/;
 /** Lines omo prints below its input box (cwd/model line, status line); more than this and the box is not at the bottom. */
 const FOOTER_MAX_LINES = 3;
+/** A running child task's row under the input box, led by its braille spinner; it does not push the box up. */
+const CHILD_ROW = /^\s*[\u2800-\u28FF] /;
 /** Recent lines read to look for omo's idle input box. */
 const SCREEN_LINES = 30;
 /** What a failed lookup means outside a delivery: the status is read as doubt, and nothing is held by the probe itself. */
@@ -24,7 +26,7 @@ export function omoScreenIdle(screen: string): boolean {
   const input = lines.lastIndexOf("❯");
   if (input < 1 || input + 1 >= lines.length) return false;
   if (!INPUT_RULE.test(lines[input - 1] ?? "") || !INPUT_RULE.test(lines[input + 1] ?? "")) return false;
-  return lines.length - 1 - (input + 1) <= FOOTER_MAX_LINES;
+  return lines.slice(input + 2).filter((l) => !CHILD_ROW.test(l)).length <= FOOTER_MAX_LINES;
 }
 
 export type PaneAgent = { status: AgentStatus; agent?: string; title?: string; cwd?: string };

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { shq } from "./delivery.ts";
 import { chatLanes, prompt, type Deps } from "./harness.ts";
@@ -30,6 +30,9 @@ export async function startLane(
   if (existing && existing.status !== "done" && existing.status !== "lost")
     throw new Refusal(`lane ${key} is already open in ${refText(existing.sessionRef)}`);
   const cwd = resolve(opts.cwd ?? process.cwd());
+  // Checked before anything is written or opened: a missing brief was a raw ENOENT, and a missing cwd went on to the runtime.
+  if (!existsSync(briefFile)) throw new Refusal(`no brief file ${briefFile}`);
+  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Refusal(`no directory ${cwd}`);
   const briefPath = d.store.briefPath(key);
   const footer = prompt("lane-footer.md", { key, dori: d.doriCmd });
   // Re-opening a lane reuses its brief file: the old footer is cut off first, so the rules land in it once instead of
@@ -109,6 +112,8 @@ export async function ready(
   evidence: readonly string[],
 ): Promise<SendResult | undefined> {
   if (evidence.length === 0) throw new Refusal("READY needs at least one --evidence link (a PR, a receipt, a file)");
+  // --evidence "$PR_URL" with PR_URL unset would mark the lane ready on an empty link.
+  if (evidence.some((e) => !e.trim())) throw new Refusal("READY --evidence is empty: give a PR, a receipt or a file");
   if (!text.trim()) throw new Refusal("READY needs the final answer text");
   const lane = openLane(d, key);
   const now = d.now();

@@ -86,3 +86,72 @@ describe("deliver: idle read off the screen while hc still says working", () => 
     expect(sends(fake.calls)).toEqual([["send", "t1", "--if", "idle", "--", "x"]]);
   });
 });
+
+describe("probe: an agent that never reports OSC 7501 (omo) is read off its screen", () => {
+  const unreported = (name?: string) =>
+    terminal({ status: null, reported: false, ...(name === undefined ? {} : { screen: screen(name) }) });
+
+  test("omo's idle input on screen probes idle", async () => {
+    const { fake, rt } = rig({ t1: unreported("omo-idle-live-monitors") });
+    expect((await rt.probe(T1)).status).toBe("idle");
+    expect(reads(fake.calls)).toEqual([["read", "t1", "--lines", "30"]]);
+  });
+
+  test("a turn on screen (esc to interrupt) probes working", async () => {
+    const { rt } = rig({ t1: unreported("omo-turn") });
+    expect((await rt.probe(T1)).status).toBe("working");
+  });
+
+  test.each(["omo-dialog", "omo-draft"])("%s on screen gives no verdict and stays unknown", async (name) => {
+    const { rt } = rig({ t1: unreported(name) });
+    expect((await rt.probe(T1)).status).toBe("unknown");
+  });
+
+  test("no screen at all stays unknown", async () => {
+    const { rt } = rig({ t1: unreported() });
+    expect((await rt.probe(T1)).status).toBe("unknown");
+  });
+
+  test("a failed screen read stays unknown (doubt never reads as ready)", async () => {
+    const { fake, rt } = rig({ t1: unreported("omo-idle-live-monitors") });
+    fake.knobs.readError = "unavailable";
+    expect((await rt.probe(T1)).status).toBe("unknown");
+  });
+
+  test("a shell in front is never screen-classified", async () => {
+    const { fake, rt } = rig({
+      t1: terminal({
+        status: null,
+        reported: false,
+        foreground: { name: "zsh", argv: ["-zsh"], pid: 1 },
+        screen: screen("omo-idle-live-monitors"),
+      }),
+    });
+    const p = await rt.probe(T1);
+    expect(p.status).toBe("shell");
+    expect(reads(fake.calls)).toEqual([]);
+  });
+});
+
+describe("deliver: an unreported agent is gated by the screen, not hc's word", () => {
+  test("idle on screen sends with no --if (hc has no word to compare)", async () => {
+    const { fake, rt } = rig({
+      t1: terminal({ status: null, reported: false, screen: screen("omo-idle-live-monitors") }),
+    });
+    expect((await rt.deliver(T1, "[READY] lane")).kind).toBe("delivered");
+    expect(sends(fake.calls)).toEqual([["send", "t1", "--", "[READY] lane"]]);
+  });
+
+  test("a turn on screen keeps the message queued as working", async () => {
+    const { fake, rt } = rig({
+      t1: terminal({ status: null, reported: false, screen: screen("omo-turn") }),
+    });
+    expect(await rt.deliver(T1, "x")).toEqual({ kind: "not-ready", status: "working" });
+    expect(fake.sent).toEqual([]);
+  });
+
+  test("no verdict on screen stays not-ready unknown", async () => {
+    const { rt } = rig({ t1: terminal({ status: null, reported: false, screen: screen("omo-dialog") }) });
+    expect(await rt.deliver(T1, "x")).toEqual({ kind: "not-ready", status: "unknown" });
+  });
+});

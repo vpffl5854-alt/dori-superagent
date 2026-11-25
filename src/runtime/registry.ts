@@ -1,3 +1,4 @@
+import { selfRef as hostSelf } from "./omo-host/sessions.ts";
 import type { RuntimeKind, SessionRef, SessionRuntime } from "./types.ts";
 
 const nonEmpty = (value: string | undefined): string | undefined =>
@@ -30,10 +31,14 @@ export class Runtimes {
   }
 
   /**
-   * The caller's own session from whichever runtime it runs in, whatever kind is selected: `HC_TERMINAL_ID` names an
-   * hc terminal, else `HERDR_PANE_ID` a herdr pane (grouped by `HERDR_WORKSPACE_ID` when set). Builds no runtime.
+   * The caller's own session from whichever runtime it runs in, whatever kind is selected: inside an omo host session
+   * its PI_SESSION_ID (first: a host started from a terminal inherits that terminal's HC_TERMINAL_ID), else
+   * `HC_TERMINAL_ID` names an hc terminal, else `HERDR_PANE_ID` a herdr pane (grouped by `HERDR_WORKSPACE_ID` when
+   * set). Builds no runtime.
    */
   selfAny(env: Readonly<Record<string, string | undefined>>): SessionRef | undefined {
+    const hosted = hostSelf(env);
+    if (hosted !== undefined) return hosted;
     const terminal = nonEmpty(env["HC_TERMINAL_ID"]);
     if (terminal !== undefined) return { runtime: "hc", id: terminal };
     const pane = nonEmpty(env["HERDR_PANE_ID"]);

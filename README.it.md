@@ -166,17 +166,21 @@ Quando una consegna fallisce dopo che il testo potrebbe essere già arrivato nel
 
 ### Solleciti a 10, 20 e 40 minuti
 
-Una lane che non fa rapporto da 10 minuti, e il cui pane non sta lavorando, riceve `prompts/nudge.md` nel suo pane, di nuovo a 20, e a 40 il duty loop invia al lead `[ESCALATE <key>]`. Una lane che ha riportato `--status waiting`, o il cui pane è `blocked`, viene lasciata in pace.
+Una lane che non fa rapporto da 10 minuti, e il cui pane non sta lavorando, riceve `prompts/nudge.md` nel suo pane, di nuovo a 20, e a 40 il duty loop invia al lead `[ESCALATE <key>]`. Una lane che ha riportato `--status waiting` viene lasciata in pace.
+
+Un pane fermo in `blocked` o `error` non accetta input, quindi nulla lo farebbe ripartire: dopo 10 minuti il duty loop invia al lead `[STUCK <key>]` una volta per quella sosta e non scrive nulla nel pane. Quando il pane torna a dire altro, una sosta successiva viene riportata di nuovo.
 
 ### Il merge richiede una receipt CLEAR sull'head esatto e check verdi
 
-`dori merge` legge con `gh` lo SHA di head della PR, poi richiede in `~/.dori/receipts/` una receipt per quello SHA con verdetto `CLEAR`. Solo `dori review` scrive receipt: lancia un omo nuovo e non interattivo su `prompts/review.md`, fissato a quello SHA, e quando il reviewer non stampa una riga `VERDICT:` non viene scritta nessuna receipt.
+`dori merge` legge con `gh` lo SHA di head della PR, poi richiede in `~/.dori/receipts/` una receipt per quello SHA con verdetto `CLEAR`. Solo `dori review` scrive receipt: lancia un omo nuovo e non interattivo su `prompts/review.md`, fissato a quello SHA; una review rimuove la receipt precedente per quello SHA prima di iniziare e ne scrive una nuova solo quando restituisce CLEAR o BLOCK. Il verdetto è una riga `VERDICT: CLEAR` o `VERDICT: BLOCK` che inizia a colonna zero (un breve motivo dopo il valore è ammesso) oppure la stessa riga interamente avvolta in enfasi markdown o backtick; se il reviewer non stampa né l'una né l'altra, non viene scritta nessuna receipt. Indentazione, punti elenco, citazioni ed esempi in blocchi di codice non contano; se una riga semplice e una enfatizzata sono in conflitto, non viene scritta nessuna receipt. Mentre una review o un merge su quello SHA è in corso, `dori merge` rifiuta invece di usare una receipt precedente.
 
 Poi `gh pr checks` deve restituire almeno un check, ogni check deve essere `pass` o `skipping`, e almeno uno deve essere `pass`. Una lista di check vuota viene rifiutata con "an empty check list is never green". Un push dopo la review cambia lo SHA di head, quindi la receipt non corrisponde più e `dori review` va rilanciato.
 
+Un workflow `pull_request` di una PR da fork può restare in attesa dell'approvazione di un maintainer, fallire all'avvio o essere annullato senza lasciare un check run, quindi `gh pr checks` non lo elenca mai e una lista di soli `pass`/`skipping` può nasconderlo. Per questo `dori merge` legge anche i run `pull_request` all'head esatto (`gh api repos/<owner>/<repo>/actions/runs?head_sha=<head>&event=pull_request`) e rifiuta il merge finché il run più recente di ogni workflow non è completato come `success`, `skipped` o `neutral`: `MERGE_REFUSED pull_request workflow run(s) not green at head <sha>: ci=action_required`. Conta solo il run più recente di ogni workflow, quindi un run annullato o obsoleto lasciato da una PR riaperta non blocca, e i run di un altro head o di un altro evento (`push`, `pull_request_target`) non bloccano mai. Se i run non sono leggibili (repository privato senza accesso in lettura ad Actions, Actions disattivate, risposta troncata o malformata), il merge viene rifiutato invece di essere considerato verde. Il rifiuto ne indica la causa, `Actions status unavailable (permission denied or Actions disabled)`, e il merge resta rifiutato finché lo stato dei workflow non è verificabile: una credenziale con accesso in lettura ad Actions, o le impostazioni Actions del repository, sono la via d'uscita, non un aggiramento. Anche `--dry-run` esegue lo stesso controllo.
+
 ### Hook per i tuoi strumenti
 
-`$DORI_HOME/config.json` può indicare template di argv sotto `hooks`: `onReady`, `onReport` e `onLost` girano in background quando avvengono quegli eventi (con `{key}`, `{text}` e `{evidence}` compilati argomento per argomento), e `reviewCommand` sostituisce il reviewer integrato purché stampi la stessa riga `VERDICT:`. `DORI_PROMPTS_DIR` indica all'harness le tue copie dei prompt.
+`$DORI_HOME/config.json` può indicare template di argv sotto `hooks`: `onReady`, `onReport` e `onLost` girano in background quando avvengono quegli eventi (con `{key}`, `{text}` e `{evidence}` compilati argomento per argomento), e `reviewCommand` sostituisce il reviewer integrato purché stampi la stessa riga a colonna zero `VERDICT: CLEAR` o `VERDICT: BLOCK` (motivo dopo il valore ammesso) o la riga intera enfatizzata. `DORI_PROMPTS_DIR` indica all'harness le tue copie dei prompt.
 
 ## Dori mode in dettaglio
 
@@ -275,7 +279,7 @@ dori invia conteggi d'uso anonimi nello stesso modo di omo: log OTLP/HTTP JSON a
 | `dori.lane_ready` | `dori ready` | `evidence_count`, `lane_minutes` |
 | `dori.review_completed` | `dori review` | `verdict`: `CLEAR` o `BLOCK` |
 | `dori.merge_decided` | `dori merge` senza `--dry-run` | `outcome` |
-| `dori.duty_summary` | al massimo una volta all'ora, dal duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost` |
+| `dori.duty_summary` | al massimo una volta all'ora, dal duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost`, `stuck` |
 
 Ogni record riporta anche nome e versione del servizio, l'hash di installazione, un flag CI, tipo e versione del sistema operativo e l'architettura della CPU. Mai inviati: percorsi, nomi di repository, numeri di PR, chiavi delle lane, brief, messaggi o qualsiasi altro testo. Un comando aspetta l'invio al massimo 2 secondi, e un errore della telemetria non fa mai fallire un comando.
 

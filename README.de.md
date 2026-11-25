@@ -166,17 +166,21 @@ Wenn eine Zustellung fehlschlug, nachdem der Text das Pane womöglich schon erre
 
 ### Anstupser nach 10, 20 und 40 Minuten
 
-Eine Lane, die sich 10 Minuten nicht gemeldet hat und deren Pane nicht arbeitet, bekommt `prompts/nudge.md` in ihr Pane, nach 20 noch einmal, und nach 40 schickt der Duty-Loop dem Lead `[ESCALATE <key>]`. Eine Lane, die `--status waiting` gemeldet hat oder deren Pane `blocked` ist, bleibt in Ruhe.
+Eine Lane, die sich 10 Minuten nicht gemeldet hat und deren Pane nicht arbeitet, bekommt `prompts/nudge.md` in ihr Pane, nach 20 noch einmal, und nach 40 schickt der Duty-Loop dem Lead `[ESCALATE <key>]`. Eine Lane, die `--status waiting` gemeldet hat, bleibt in Ruhe.
+
+Ein Pane, das in `blocked` oder `error` steht, nimmt keine Eingabe an, also würde es sich von selbst nie wieder bewegen: nach 10 Minuten schickt der Duty-Loop dem Lead für diesen Stillstand einmal `[STUCK <key>]` und tippt nichts in das Pane. Meldet das Pane wieder etwas anderes, wird ein späterer Stillstand erneut gemeldet.
 
 ### Merge braucht ein CLEAR-Receipt am exakten Head und grüne Checks
 
-`dori merge` liest mit `gh` die Head-SHA des PRs und verlangt dann für genau diese SHA ein Receipt in `~/.dori/receipts/` mit dem Urteil `CLEAR`. Receipts schreibt nur `dori review`: Es startet ein frisches, nicht interaktives omo auf `prompts/review.md`, festgenagelt auf diese SHA, und wenn der Reviewer keine `VERDICT:`-Zeile ausgibt, wird kein Receipt geschrieben.
+`dori merge` liest mit `gh` die Head-SHA des PRs und verlangt dann für genau diese SHA ein Receipt in `~/.dori/receipts/` mit dem Urteil `CLEAR`. Receipts schreibt nur `dori review`: Es startet ein frisches, nicht interaktives omo auf `prompts/review.md`, festgenagelt auf diese SHA; eine Prüfung entfernt das frühere Receipt für diese SHA, bevor sie startet, und schreibt nur dann ein neues, wenn sie CLEAR oder BLOCK zurückgibt. Als Urteil zählt eine am Zeilenanfang stehende `VERDICT: CLEAR`- oder `VERDICT: BLOCK`-Zeile (ein kurzer Grund dahinter ist erlaubt) oder dieselbe Zeile als Ganzes in Markdown-Hervorhebung oder Backticks; gibt der Reviewer keins von beiden aus, wird kein Receipt geschrieben. Einrückung, Aufzählungszeichen, Zitate und Beispiele in Codeblöcken zählen nicht; widersprechen sich eine schmucklose und eine hervorgehobene Zeile, wird kein Receipt geschrieben. Solange am selben Head eine Prüfung oder ein Merge läuft, verweigert `dori merge` statt ein älteres Receipt zu nutzen.
 
 Dann muss `gh pr checks` mindestens einen Check liefern, jeder Check muss `pass` oder `skipping` sein, und mindestens einer muss `pass` sein. Eine leere Check-Liste wird abgelehnt mit "an empty check list is never green". Ein Push nach dem Review ändert die Head-SHA, damit passt das Receipt nicht mehr, und `dori review` muss erneut laufen.
 
+Ein `pull_request`-Workflow eines Fork-PRs kann auf die Freigabe durch einen Maintainer warten, beim Start scheitern oder abgebrochen werden, ohne einen Check-Run zu hinterlassen; deshalb führt `gh pr checks` ihn nie auf, und eine Liste aus lauter `pass`/`skipping` kann ihn verdecken. `dori merge` liest deshalb zusätzlich die `pull_request`-Läufe am exakten Head (`gh api repos/<owner>/<repo>/actions/runs?head_sha=<head>&event=pull_request`) und verweigert den Merge, solange der neueste Lauf eines Workflows dort nicht als `success`, `skipped` oder `neutral` abgeschlossen ist: `MERGE_REFUSED pull_request workflow run(s) not green at head <sha>: ci=action_required`. Nur der neueste Lauf je Workflow zählt, ein älterer abgebrochener oder veralteter Lauf von einem erneut geöffneten PR blockiert also nicht, und Läufe für einen anderen Head oder ein anderes Event (`push`, `pull_request_target`) blockieren nie. Lassen sich die Läufe nicht lesen (privates Repository ohne Actions-Leserecht, deaktivierte Actions, eine abgeschnittene oder fehlerhafte Antwort), wird der Merge verweigert statt als grün behandelt. Die Verweigerung nennt die Ursache, `Actions status unavailable (permission denied or Actions disabled)`, und der Merge bleibt verweigert, bis der Workflow-Status geprüft werden kann: ein Credential mit Actions-Leserecht oder die Actions-Einstellungen des Repositories sind der Ausweg, nicht ein Umweg. `--dry-run` führt dieselbe Prüfung aus.
+
 ### Hooks für dein eigenes Tooling
 
-`$DORI_HOME/config.json` kann unter `hooks` argv-Vorlagen nennen: `onReady`, `onReport` und `onLost` laufen im Hintergrund, wenn diese Ereignisse eintreten (mit `{key}`, `{text}` und `{evidence}` pro Argument eingesetzt), und `reviewCommand` ersetzt den eingebauten Reviewer, solange es dieselbe `VERDICT:`-Zeile ausgibt. `DORI_PROMPTS_DIR` verweist den Harness auf deine eigenen Kopien der Prompts.
+`$DORI_HOME/config.json` kann unter `hooks` argv-Vorlagen nennen: `onReady`, `onReport` und `onLost` laufen im Hintergrund, wenn diese Ereignisse eintreten (mit `{key}`, `{text}` und `{evidence}` pro Argument eingesetzt), und `reviewCommand` ersetzt den eingebauten Reviewer, solange es dieselbe am Zeilenanfang stehende `VERDICT: CLEAR`- oder `VERDICT: BLOCK`-Zeile (Grund dahinter erlaubt) oder die hervorgehobene ganze Zeile ausgibt. `DORI_PROMPTS_DIR` verweist den Harness auf deine eigenen Kopien der Prompts.
 
 ## Dori mode im Detail
 
@@ -275,7 +279,7 @@ dori sendet anonyme Nutzungszahlen auf dieselbe Weise wie omo: OTLP/HTTP-JSON-Lo
 | `dori.lane_ready` | `dori ready` | `evidence_count`, `lane_minutes` |
 | `dori.review_completed` | `dori review` | `verdict`: `CLEAR` oder `BLOCK` |
 | `dori.merge_decided` | `dori merge` ohne `--dry-run` | `outcome` |
-| `dori.duty_summary` | höchstens einmal pro Stunde, vom Duty-Loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost` |
+| `dori.duty_summary` | höchstens einmal pro Stunde, vom Duty-Loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost`, `stuck` |
 
 Jeder Eintrag enthält außerdem den Dienstnamen und die Version, den Installations-Hash, ein CI-Flag, Typ und Version des Betriebssystems und die CPU-Architektur. Nie gesendet werden: Pfade, Repo-Namen, PR-Nummern, Lane-Keys, Briefs, Nachrichten oder sonst irgendein Text. Ein Befehl wartet höchstens 2 Sekunden auf das Senden, und ein Telemetriefehler lässt nie einen Befehl fehlschlagen.
 

@@ -162,21 +162,25 @@ The lead is the only session that talks to you (`prompts/lead.md`). The lane rul
 
 `dori send` asks herdr for the pane's agent state first. `idle` or `done` get the message now; anything else has it queued in `~/.dori/inbox/`, and the duty loop delivers the queue when the pane goes idle, as one batch. A pane with a shell in front is never typed into, because typed text would run as a command.
 
-When a delivery failed after the text may already have reached the pane, only Enter is pressed later, and only into the agent it was typed into; if herdr then sees a different agent, the entry is held, the lead is told once with `[DELIVERY-AMBIGUOUS <pane>]`, and `dori inbox ack` or `dori inbox resend` settles it by hand.
+When a delivery failed after the text may already have reached the pane, only Enter is pressed later, and only into the agent it was typed into; if herdr then sees a different agent, the entry is held, the lead is told once with `[DELIVERY-AMBIGUOUS <pane>]`, and `dori inbox ack` or `dori inbox resend` settles it by hand. A message that never reached the pane and no longer should — a stale instruction left in a pane that read `working` for hours — is thrown away with `dori inbox drop <pane|role|key> <index>`, or `--all` for every queued entry of that inbox.
 
 ### Nudges at 10, 20 and 40 minutes
 
-A lane that has not reported for 10 minutes, and whose pane is not working, gets `prompts/nudge.md` in its pane, again at 20, and at 40 the duty loop sends the lead `[ESCALATE <key>]`. A lane that reported `--status waiting`, or whose pane is `blocked`, is left alone.
+A lane that has not reported for 10 minutes, and whose pane is not working, gets `prompts/nudge.md` in its pane, again at 20, and at 40 the duty loop sends the lead `[ESCALATE <key>]`. A lane that reported `--status waiting` is left alone.
+
+A pane that stands in `blocked` or `error` takes no input, so nothing would ever move it: after 10 minutes the duty loop sends the lead `[STUCK <key>]` once for that stall and types nothing into the pane. When the pane says anything else again, a later stall is reported again.
 
 ### Merge needs a CLEAR receipt at the exact head and green checks
 
-`dori merge` reads the PR's head SHA with `gh`, then requires a receipt for that SHA in `~/.dori/receipts/` with verdict `CLEAR`. Only `dori review` writes receipts: it runs a fresh non-interactive omo on `prompts/review.md` pinned to that SHA, and when the reviewer prints no `VERDICT:` line, no receipt is written.
+`dori merge` reads the PR's head SHA with `gh`, then requires a receipt for that SHA in `~/.dori/receipts/` with verdict `CLEAR`. Only `dori review` writes receipts: it runs a fresh non-interactive omo on `prompts/review.md` pinned to that SHA; a review clears the earlier receipt for that SHA before it starts and writes a new one only when it returns CLEAR or BLOCK. The verdict is a column-zero `VERDICT: CLEAR` or `VERDICT: BLOCK` line (a trailing reason is allowed) or that whole line in markdown emphasis such as `**VERDICT: CLEAR**`; when the reviewer prints neither, no receipt is written. Bullets, blockquotes and indented code never count, and a plain and an emphasised verdict that disagree write no receipt. While a review or merge at that head is in progress, `dori merge` refuses instead of using an older receipt.
 
 Then `gh pr checks` must return at least one check, every check must be `pass` or `skipping`, and at least one must be `pass`. An empty check list is refused with "an empty check list is never green". A push after the review changes the head SHA, so the receipt no longer matches and `dori review` has to run again.
 
+A fork PR's `pull_request` workflow can wait for a maintainer's approval, fail to start, or be cancelled without leaving a check run, so `gh pr checks` never lists it and a check list of only `pass`/`skipping` can hide it. `dori merge` therefore also reads the `pull_request` runs at the exact head (`gh api repos/<owner>/<repo>/actions/runs?head_sha=<head>&event=pull_request`) and refuses while the latest run of any workflow there is not completed as `success`, `skipped` or `neutral`: `MERGE_REFUSED pull_request workflow run(s) not green at head <sha>: ci=action_required`. Only the newest run of each workflow counts, so an older cancelled or stale run left by a reopened PR does not block, and runs for another head or another event (`push`, `pull_request_target`) never block. When the runs cannot be read (a private repo without Actions read access, Actions disabled, a truncated or malformed answer), the merge is refused rather than treated as green. The refusal names the cause, `Actions status unavailable (permission denied or Actions disabled)`, and the merge stays refused until the workflow status can be verified: a credential with Actions read access, or the repository's Actions settings, is the way out rather than a way around. `--dry-run` runs the same check.
+
 ### Hooks for your own tooling
 
-`$DORI_HOME/config.json` may name argv templates under `hooks`: `onReady`, `onReport`, `onLost` and `onIdle` (the last open lane closed) run in the background when those events happen (with `{key}`, `{text}` and `{evidence}` filled in per argument), and `reviewCommand` replaces the built-in reviewer as long as it prints the same `VERDICT:` line. `DORI_PROMPTS_DIR` points the harness at your own copies of the prompts.
+`$DORI_HOME/config.json` may name argv templates under `hooks`: `onReady`, `onReport`, `onLost` and `onIdle` (the last open lane closed) run in the background when those events happen (with `{key}`, `{text}` and `{evidence}` filled in per argument), and `reviewCommand` replaces the built-in reviewer as long as it prints the same column-zero `VERDICT: CLEAR` or `VERDICT: BLOCK` line (a trailing reason is allowed) or the whole-line emphasised form. `DORI_PROMPTS_DIR` points the harness at your own copies of the prompts.
 
 ## Dori mode in depth
 
@@ -275,7 +279,7 @@ dori sends anonymous usage counts the same way omo does: OTLP/HTTP JSON logs to 
 | `dori.lane_ready` | `dori ready` | `evidence_count`, `lane_minutes` |
 | `dori.review_completed` | `dori review` | `verdict`: `CLEAR` or `BLOCK` |
 | `dori.merge_decided` | `dori merge` without `--dry-run` | `outcome` |
-| `dori.duty_summary` | at most once an hour, from the duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost` |
+| `dori.duty_summary` | at most once an hour, from the duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost`, `stuck` |
 
 Every record also carries the service name and version, the install hash, a CI flag, the OS type and version, and the CPU architecture. Never sent: paths, repo names, PR numbers, lane keys, briefs, messages or any other text. A command waits at most 2 seconds for the send, and a telemetry failure never fails a command.
 

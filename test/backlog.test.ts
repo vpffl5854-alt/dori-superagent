@@ -18,6 +18,9 @@ describe("backlog", () => {
     expect(() => backlogAdd(d, "ok-id", brief, { priority: 0 })).toThrow("--priority");
     expect(() => backlogAdd(d, "ok-id", brief, { priority: 10 })).toThrow("--priority");
     expect(() => backlogAdd(d, "ok-id", join(d.store.root, "missing.md"))).toThrow("no brief");
+    expect(() => backlogAdd(d, "ok-id", brief, { cwd: join(d.store.root, "gone") })).toThrow("no directory");
+    expect(() => backlogAdd(d, "ok-id", brief, { cwd: brief })).toThrow("no directory");
+    expect(d.store.item("ok-id")).toBeUndefined();
     const item = add("ok-id");
     expect(item).toMatchObject({ status: "open", priority: 5, attempts: 0 });
     expect(readFileSync(item.brief, "utf8")).toBe("Do the thing.");
