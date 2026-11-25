@@ -16,7 +16,7 @@ find "$DEST" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 mkdir -p "$DEST/dori-home" "$DEST/LaunchAgents" "$DEST/repo-local"
 for f in config.json decisions.md roles.json; do [ -f "$HOME_DIR/$f" ] && cp "$HOME_DIR/$f" "$DEST/dori-home/"; done
 for d in briefs backlog lanes; do [ -d "$HOME_DIR/$d" ] && cp -R "$HOME_DIR/$d" "$DEST/dori-home/"; done
-cp ~/Library/LaunchAgents/com.dori.*.plist "$DEST/LaunchAgents/" 2>/dev/null
+cp ~/Library/LaunchAgents/com.dori.*.plist ~/Library/LaunchAgents/com.jib.devin-herdr.plist "$DEST/LaunchAgents/" 2>/dev/null
 [ -f "$HOME/dori-superagent/HANDOVER.md" ] && cp "$HOME/dori-superagent/HANDOVER.md" "$DEST/repo-local/"
 [ -f "$HOME/.local/bin/dori-skill" ] && cp -L "$HOME/.local/bin/dori-skill" "$DEST/repo-local/"
 [ -f "$HOME/.config/devin/AGENTS.md" ] && cp "$HOME/.config/devin/AGENTS.md" "$DEST/repo-local/devin-AGENTS.md"
