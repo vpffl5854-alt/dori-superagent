@@ -1,0 +1,99 @@
+#!/bin/bash
+# 재부팅 점검: 로그인하고 5분 뒤(launchd com.dori.boot-report) 계속 떠 있어야 할 서비스와 Herdr 판을 한 번 보고,
+# 빈 판은 그 판을 띄우는 런처로 다시 켠 뒤, 결과를 도리방에 한 통 보낸다.
+# 2026-11-25 재부팅 뒤 watchdog 이 꺼져 있었는데 사람이 직접 찾기 전까지 아무도 몰랐다.
+#   --now      기다리지 않고 바로 점검   --no-send  도리방에 안 보내고 화면에만   --no-fix  빈 판을 다시 켜지 않음
+set -u
+NOW=0 SEND=1 FIX=1
+for a in "$@"; do case "$a" in --now) NOW=1 ;; --no-send) SEND=0 ;; --no-fix) FIX=0 ;; esac; done
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+[ "$NOW" = 1 ] || sleep "${BOOT_REPORT_WAIT:-300}"
+APP="$HOME/.local/bin/herdr-app" HC="$HOME/.local/bin/hc" UID_="$(id -u)"
+
+# 판: "space|탭|떠 있어야 할 프로그램|빈 판을 다시 켜는 런처(없으면 -)"
+TABS=(
+  "슈퍼도리|리드|omo|$HOME/.local/bin/슈퍼도리"
+  "슈퍼도리|duty|omo|$HOME/.local/bin/슈퍼도리"
+  "슈퍼도리|duty-loop|bun|$HOME/.local/bin/슈퍼도리"
+  "슈퍼도리|hourly-loop|bun|$HOME/.local/bin/슈퍼도리"
+  "슈퍼도리|디코도리|omo|$HOME/.dori-superagent/bin/discord-chat-lane"
+  "슈퍼도리|맥손|bun|$HOME/.dori-superagent/bin/mac-hand"
+  "omomeow|카톡 도리|omo|-"
+  "omomeow|main|omo|-"
+  "omomeow|인스타 도리|omo|-"
+  "omomeow|OmOMeow Telegram|omo|-"
+  "devin|devin|devin|$HOME/.local/bin/devin-herdr"
+  "claude code|Claude Code|claude|$HOME/.local/bin/claude-code-herdr"
+)
+
+# 시험용: BOOT_REPORT_EXTRA_TAB="space|탭|프로그램|-" 로 판 하나를 더 본다.
+[ -n "${BOOT_REPORT_EXTRA_TAB:-}" ] && TABS+=("$BOOT_REPORT_EXTRA_TAB")
+
+# 지금 그 판 앞에 떠 있는 프로그램 이름(없으면 "없음", 판이 없으면 "판없음")
+fg_of() {
+  local term
+  term="$("$APP" ls 2>/dev/null | node -e '
+    let r = ""; process.stdin.on("data", (c) => (r += c)).on("end", () => {
+      try {
+        const s = (JSON.parse(r).spaces ?? []).find((x) => x.name === process.argv[1]);
+        const t = (s?.tabs ?? []).find((x) => x.name === process.argv[2]);
+        process.stdout.write(t?.terminals?.[0]?.terminal ?? "");
+      } catch {}
+    });' "$1" "$2")"
+  [ -n "$term" ] || { echo "판없음"; return; }
+  "$HC" get "$term" 2>/dev/null | node -e '
+    let r = ""; process.stdin.on("data", (c) => (r += c)).on("end", () => {
+      try { process.stdout.write(String(JSON.parse(r).foreground?.argv?.[0] ?? "").split("/").pop() || "없음"); }
+      catch { process.stdout.write("없음"); }
+    });'
+}
+tab_ok() { [ "$(fg_of "$1" "$2")" = "$3" ]; }
+
+# 계속 떠 있어야 하는 서비스: KeepAlive 가 켜진 우리 launchd 작업 중 지금 PID 가 없는 것
+down_services() {
+  local p label off
+  # 일부러 꺼둔 것(launchctl disable)은 빼고 본다: etf-dashboard 처럼 지브가 꺼둔 작업이 매번 "꺼짐"으로 뜨지 않게.
+  off="$(launchctl print-disabled "gui/$UID_" 2>/dev/null | grep '=> disabled' | sed -E 's/^[[:space:]]*"([^"]+)".*/\1/')"
+  for p in "$HOME"/Library/LaunchAgents/{com.dori,com.jib,dev.jib,com.kakao-nyang,com.cue}.*.plist; do
+    [ -f "$p" ] || continue
+    [ "$(plutil -extract KeepAlive raw "$p" 2>/dev/null)" = "true" ] || continue
+    label="$(plutil -extract Label raw "$p" 2>/dev/null)"
+    grep -qx "$label" <<<"$off" && continue
+    launchctl print "gui/$UID_/$label" 2>/dev/null | grep -q '^\s*pid = [0-9]' || echo "$label"
+  done
+}
+
+bad_tabs=() fixed=() still=()
+for row in "${TABS[@]}"; do
+  IFS='|' read -r sp tab want launcher <<<"$row"
+  tab_ok "$sp" "$tab" "$want" || bad_tabs+=("$row")
+done
+if [ "$FIX" = 1 ] && [ ${#bad_tabs[@]} -gt 0 ]; then
+  ran=""
+  for row in "${bad_tabs[@]}"; do
+    IFS='|' read -r sp tab want launcher <<<"$row"
+    [ "$launcher" = "-" ] || [[ "$ran" == *"|$launcher|"* ]] || { bash "$launcher" &>/dev/null; ran+="|$launcher|"; }
+  done
+  sleep 30
+fi
+for row in "${bad_tabs[@]+"${bad_tabs[@]}"}"; do
+  IFS='|' read -r sp tab want launcher <<<"$row"
+  if [ "$FIX" = 1 ] && tab_ok "$sp" "$tab" "$want"; then fixed+=("$tab"); else still+=("$tab($(fg_of "$sp" "$tab"))"); fi
+done
+svc_down=()
+while IFS= read -r l; do [ -n "$l" ] && svc_down+=("$l"); done < <(down_services)
+
+up_min=$(( ( $(date +%s) - $(sysctl -n kern.boottime | sed -E 's/^\{ sec = ([0-9]+),.*/\1/') ) / 60 ))
+msg="재부팅 점검 ($(date '+%m/%d %H:%M'), 켜진 지 ${up_min}분)"
+total=${#TABS[@]}
+if [ ${#still[@]} -eq 0 ] && [ ${#svc_down[@]} -eq 0 ]; then
+  msg+=$'\n'"다 정상이에요. 판 ${total}개, 뒤에서 도는 서비스 모두 떠 있어요."
+else
+  msg+=$'\n'"판: $(( total - ${#still[@]} ))/${total}개 정상"
+  [ ${#still[@]} -gt 0 ] && msg+=$'\n'"안 뜬 판: ${still[*]}"
+  [ ${#svc_down[@]} -gt 0 ] && msg+=$'\n'"꺼진 서비스: ${svc_down[*]}"
+fi
+[ ${#fixed[@]} -gt 0 ] && msg+=$'\n'"비어 있어서 다시 켠 판: ${fixed[*]}"
+echo "$msg"
+[ "$SEND" = 1 ] && dori-skill notify --level now --source "재부팅 점검" --text "$msg" >/dev/null
+exit 0
