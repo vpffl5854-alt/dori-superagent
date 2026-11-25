@@ -28,6 +28,8 @@ export type GoalDeps = RunOpts & {
   readonly openApp: (app: string) => Promise<void>;
   /** Hold a dangerous step for the owner's 진행. */
   readonly hold: (task: MacTask) => Promise<void>;
+  /** The name the Mac shows for an app the model named in English or Korean ("TextEdit" -> "텍스트 편집기"). */
+  readonly appName?: (app: string) => Promise<string>;
 };
 
 export type GoalResult = {
@@ -58,6 +60,13 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
   let replayable = true;
   let fails = 0;
   let app: string | undefined;
+  /** The app's window the model chose with look; unset, the front titled one. */
+  let title: string | undefined;
+  const names = new Map<string, string>();
+  const named = async (a: string): Promise<string> => {
+    if (!names.has(a)) names.set(a, d.appName ? await d.appName(a).catch(() => a) : a);
+    return names.get(a) ?? a;
+  };
   let plan: readonly string[] = [];
   let before: Uint8Array<ArrayBuffer> | undefined;
   const menus = new Map<string, string>();
@@ -66,7 +75,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
     ((await e.call("ax.snapshot", { target: id, opts: { all: true, maxNodes: 3000 } })).result as { text?: string })
       ?.text ?? "";
   const finish = async (ok: boolean, text: string, held = false): Promise<GoalResult> => {
-    const w = app ? findWindow(await windows(), app) : undefined;
+    const w = app ? findWindow(await windows(), app, title) : undefined;
     const after = d.photos && w ? await photo(e, w.id) : undefined;
     const apps = new Set(steps.map((s) => s.app));
     const recipe =
@@ -117,7 +126,8 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (d.stopped()) return finish(false, '도리방 "멈춰"로 멈췄어요');
     const wins = await windows();
-    const w = app ? findWindow(wins, app) : undefined;
+    const w = app ? findWindow(wins, app, title) : undefined;
+    const titles = w ? wins.filter((x) => x.app === w.app && x.title.trim()).map((x) => x.title) : [];
     if (w && d.photos && !before) before = await photo(e, w.id);
     const snapshot = w ? await snapshotOf(w.id) : "";
     if (w && !menus.has(w.app)) menus.set(w.app, await menuView(e, w.id).catch(() => ""));
@@ -129,6 +139,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
       w ? (menus.get(w.app) ?? "") : "",
       plan,
       history,
+      w ? [w.title, ...titles.filter((t) => t !== w.title)] : [],
     );
     const thought = await d.think(tier, q);
     const dec = "text" in thought ? parseDecision(thought.text) : undefined;
@@ -138,7 +149,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
       continue;
     }
     if (dec.plan) plan = dec.plan;
-    const act = dec.act;
+    const act = "app" in dec.act ? { ...dec.act, app: await named(dec.act.app) } : dec.act;
     const look = dec.reflect ? ` (돌아보기: ${dec.reflect})` : "";
     if (act.do === "done") return finish(true, act.answer);
     if (act.do === "fail") {
@@ -149,6 +160,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
       failed();
       continue;
     }
+    if (act.do === "look" || act.do === "open" || act.app !== app) title = act.do === "look" ? act.window : undefined;
     app = act.app;
     const r = await doAct(e, act, { ...d, wins, ...(w ? { shown: w } : {}), snapshot, windows });
     if (r.end) return finish(false, r.end.text, r.end.held);

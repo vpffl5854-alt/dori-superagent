@@ -4,7 +4,13 @@
  * whose name pays, deletes, sends or posts is dangerous and waits for the owner's button press in 도리방.
  */
 
-export type MacTask = { readonly app: string; readonly steps: readonly string[]; readonly expect?: string };
+/** `window` picks one of the app's windows by its title, when the app has several. */
+export type MacTask = {
+  readonly app: string;
+  readonly steps: readonly string[];
+  readonly expect?: string;
+  readonly window?: string;
+};
 
 /** Words on a control whose press cannot be taken back. "지우기" (clear) is not one: it only clears a field. */
 const DANGER =
@@ -126,12 +132,15 @@ export type Win = { readonly id: string; readonly app: string; readonly title: s
 /**
  * The app's window; an app name matches its Korean or English name loosely ("계산기" or "Calculator"). A window
  * with a title comes first: an app opened twice can list an untitled window the accessibility tree does not know.
+ * With `title`, the app's window of that title comes before the others.
  */
-export const findWindow = (wins: readonly Win[], app: string): Win | undefined => {
-  const a = app.toLowerCase();
-  const exact = wins.filter((w) => w.app.toLowerCase() === a);
-  const loose = exact.length ? exact : wins.filter((w) => w.app.toLowerCase().includes(a));
-  return loose.find((w) => w.title.trim()) ?? loose[0];
+export const findWindow = (wins: readonly Win[], app: string, title?: string): Win | undefined => {
+  const norm = (s: string): string => s.normalize("NFC").toLowerCase();
+  const a = norm(app);
+  const exact = wins.filter((w) => norm(w.app) === a);
+  const loose = exact.length ? exact : wins.filter((w) => norm(w.app).includes(a));
+  const named = title ? loose.find((w) => norm(w.title).trim() === norm(title).trim()) : undefined;
+  return named ?? loose.find((w) => w.title.trim()) ?? loose[0];
 };
 
 /** 도리방 words for the stop switch: "멈춰" stops every Mac action, "재개" lets them run again. */

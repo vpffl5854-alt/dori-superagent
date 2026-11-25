@@ -30,6 +30,22 @@ export const goalKey = (goal: string): string =>
     .toLowerCase();
 
 /** Opens an app in the background; a Korean name ("계산기") is found through Spotlight's localized names. */
+/** The name the Mac shows for an app (its display name, "TextEdit" -> "텍스트 편집기"); the name itself otherwise. */
+export const shownAppName = async (app: string): Promise<string> => {
+  const q = (field: string) =>
+    run(
+      ["mdfind", `kMDItemContentType == "com.apple.application-bundle" && ${field} == "${app.replace(/"/g, "")}.app"c`],
+      {
+        timeoutMs: 10_000,
+      },
+    );
+  const path = ((await q("kMDItemFSName")).out.trim() || (await q("kMDItemDisplayName")).out.trim()).split("\n")[0];
+  if (!path) return app;
+  const shown = (await run(["mdls", "-raw", "-name", "kMDItemDisplayName", path], { timeoutMs: 10_000 })).out.trim();
+  // Names read from the file system are decomposed Hangul (NFD); the engine's app names are composed (NFC).
+  return shown && shown !== "(null)" ? shown.replace(/\.app$/, "").normalize("NFC") : app;
+};
+
 const openApp = async (app: string, background = true): Promise<boolean> => {
   const bg = background ? ["-g"] : [];
   if ((await run(["open", ...bg, "-a", app], { timeoutMs: 20_000 })).code === 0) return true;
@@ -119,6 +135,7 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
       ...base,
       think: (tier, p) => ask(tier, c.think ?? {}, p, run, macDir(config)),
       openApp: async (app) => void (await openApp(app)),
+      appName: shownAppName,
       hold: async (task) => void (await submit(config, task, true)),
     });
     if (g.ok && g.recipe)

@@ -61,7 +61,7 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
     return { ok, note, shown, waited, ...(before ? { before } : {}), ...(after ? { after } : {}) };
   };
   const windowNow = async (): Promise<Win | undefined> =>
-    findWindow(((await e.call("windows")).result as Win[] | undefined) ?? [], t.app);
+    findWindow(((await e.call("windows")).result as Win[] | undefined) ?? [], t.app, t.window);
   /** Waits while the owner's front window is the target's; false once the waits are spent. */
   const ownerAway = async (): Promise<boolean> => {
     for (;;) {

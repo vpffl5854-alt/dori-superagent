@@ -12,7 +12,7 @@
 
 export type Act =
   | { readonly do: "open"; readonly app: string }
-  | { readonly do: "look"; readonly app: string }
+  | { readonly do: "look"; readonly app: string; readonly window?: string }
   | { readonly do: "press"; readonly app: string; readonly step: string }
   | { readonly do: "type"; readonly app: string; readonly field: string; readonly text: string }
   | { readonly do: "menu"; readonly app: string; readonly path: readonly string[] }
@@ -79,6 +79,8 @@ export const prompt = (
   menus: string,
   plan: readonly string[],
   history: readonly Turn[],
+  /** The app's window titles, the shown one first, when it has several. */
+  windowTitles: readonly string[] = [],
 ): string =>
   [
     "You operate a Mac for the owner, in the background, one action at a time.",
@@ -86,6 +88,9 @@ export const prompt = (
     ...(plan.length ? ["Plan (states to reach, in order):", ...plan.map((m, i) => `  ${i + 1}. ${m}`)] : []),
     "",
     `Open apps: ${apps.join(", ") || "(none)"}`,
+    ...(app && windowTitles.length > 1
+      ? [`Windows of "${app}": ${windowTitles.map((t, i) => `"${t}"${i === 0 ? " (shown below)" : ""}`).join(", ")}`]
+      : []),
     app
       ? `Controls of "${app}" (role "name" [ref] : value):\n${snapshot.slice(0, SNAPSHOT_MAX)}`
       : "No app looked at yet.",
@@ -101,6 +106,7 @@ export const prompt = (
     "Actions (put the fields next to reflect):",
     '"do":"open","app":"<app name>"            open an app in the background (Korean or English name)',
     '"do":"look","app":"<app name>"            switch to another app (the app you work in is shown again every turn)',
+    '   add "window":"<title>" to work in another of that app\'s windows (its windows are listed above)',
     '"do":"press","app":"<app>","step":"<exact control name, or its ref like e12 when it has no name>"',
     '   the window\'s own top-left buttons are pressable as "창 닫기", "창 최소화", "창 확대"',
     '"do":"type","app":"<app>","field":"<exact field name, or its ref like e449>","text":"<text>"',
@@ -151,7 +157,7 @@ export const parseDecision = (answer: string): Decision | undefined => {
     d === "open" && app
       ? { do: d, app }
       : d === "look" && app
-        ? { do: d, app }
+        ? { do: d, app, ...(str(o["window"]) ? { window: o["window"].trim() } : {}) }
         : d === "press" && app && str(o["step"])
           ? { do: d, app, step: o["step"].trim() }
           : d === "type" && app && str(o["field"]) && typeof o["text"] === "string"
@@ -194,7 +200,7 @@ export const actLine = (a: Act): string =>
           : a.do === "open"
             ? `${a.app} 열기`
             : a.do === "look"
-              ? `${a.app} 보기`
+              ? `${a.app}${a.window ? ` "${a.window}" 창` : ""} 보기`
               : a.do === "done"
                 ? `끝: ${a.answer}`
                 : `포기: ${a.reason}`;

@@ -62,16 +62,21 @@ export type ActResult = {
 export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }>, c: ActCtx): Promise<ActResult> => {
   if (act.do === "open") {
     await c.openApp(act.app);
-    await c.sleep(1_500);
-    const ok = Boolean(findWindow(await c.windows(), act.app));
+    // An app started cold can take seconds to show its first window (TextEdit's open panel does).
+    let ok = false;
+    for (let i = 0; i < 8 && !ok; i++) {
+      await c.sleep(1_500);
+      ok = Boolean(findWindow(await c.windows(), act.app));
+    }
     return { ok, result: ok ? "열었음" : "창이 안 보임" };
   }
   if (act.do === "look") {
-    const ok = Boolean(findWindow(c.wins, act.app));
-    return { ok, result: ok ? "봤음" : "그 앱 창이 없음" };
+    const w = findWindow(c.wins, act.app, act.window);
+    const ok = Boolean(w) && (!act.window || w?.title.normalize("NFC").trim() === act.window.normalize("NFC").trim());
+    return { ok, result: ok ? "봤음" : w ? `"${act.window}" 창이 없음` : "그 앱 창이 없음" };
   }
   if (act.do === "type") {
-    const tw = findWindow(c.wins, act.app);
+    const tw = findWindow(c.wins, act.app, c.shown?.title);
     // Refs belong to one reading of the screen: the model's ref is looked up in the snapshot it was shown.
     const snap = tw && tw.id === c.shown?.id ? c.snapshot : "";
     const ref = findRef(snap, act.field);
@@ -117,7 +122,8 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
       ? { ok: false, result: `"${step}" 못 눌렀어요: ${r.error.message}` }
       : { ok: true, result: "눌렀음" };
   }
-  const r = await runTask(e, { app: act.app, steps: [step] }, { ...c, photos: false });
+  const window = c.shown && c.shown.app === findWindow(c.wins, act.app)?.app ? c.shown.title : undefined;
+  const r = await runTask(e, { app: act.app, steps: [step], ...(window ? { window } : {}) }, { ...c, photos: false });
   if (!r.ok && (r.note.includes("쓰는 중") || r.note.includes("멈춰")))
     return { ok: false, result: "", end: { text: r.note, held: false } };
   const shown = r.shown.length ? `, 보이는 값: ${r.shown.slice(0, 3).join(", ")}` : "";

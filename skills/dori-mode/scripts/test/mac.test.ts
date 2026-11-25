@@ -58,6 +58,9 @@ test("an app is found by its exact name first, then loosely", () => {
   expect(findWindow(wins, "calculator")?.id).toBe("2");
   expect(findWindow(wins, "pro")?.id).toBe("1");
   expect(findWindow(wins, "계산기")).toBeUndefined();
+  // A name read from the file system is decomposed Hangul (NFD); the engine's is composed (NFC).
+  const edit = [{ id: "7", app: "텍스트 편집기", title: "열기", focused: false }];
+  expect(findWindow(edit, "텍스트 편집기".normalize("NFD"))?.id).toBe("7");
   const twice = [
     { id: "308", app: "계산기", title: "", focused: false },
     { id: "307", app: "계산기", title: "계산기", focused: false },
