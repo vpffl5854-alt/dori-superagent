@@ -16,6 +16,7 @@ import {
 import { rememberText } from "./decisions.ts";
 import { parseMacPress, stopWord } from "./mac.ts";
 import { macGoal } from "./mac-brain.ts";
+import { parseConsentPress, recordDecision } from "./mac-consent.ts";
 import { decidePending, enqueue, newId, stopPath } from "./mac-jobs.ts";
 import { type DorichatConfig, dorichatBot } from "./dorichat-bot.ts";
 import type { Telegram } from "./messenger/telegram.ts";
@@ -75,6 +76,22 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
   if (cq) {
     if (cq.from.id !== cfg.ownerId)
       return void (await tg.call("answerCallbackQuery", { callback_query_id: cq.id, text: "주인만 누를 수 있어요" }));
+    const cp = parseConsentPress(cq.data);
+    if (cp) {
+      const ok = recordDecision(config, cp.id, cp.n);
+      const label = cq.message?.reply_markup?.inline_keyboard?.[0]?.[cp.n]?.text ?? "";
+      await tg.call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: ok ? `맥손이 "${label}"을(를) 누를게요` : "그 창은 이미 닫혔어요",
+      });
+      if (cq.message)
+        await tg.call("editMessageReplyMarkup", {
+          chat_id: cq.message.chat.id,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+      return void console.log(`DORICHAT_CONSENT ${cp.id} ${cp.n} ok=${ok}`);
+    }
     const mp = parseMacPress(cq.data);
     if (mp) {
       const ok = decidePending(config, mp.id, mp.action === "go");

@@ -26,10 +26,16 @@ export const splitModel = (ref: string): { provider: string; model: string } | u
   return i > 0 && i < ref.length - 1 ? { provider: ref.slice(0, i), model: ref.slice(i + 1) } : undefined;
 };
 
+/** A question with a picture: the text, then the image as a data URL (OpenAI-style content parts). */
+export const withImage = (text: string, bytes: Uint8Array, mime = "image/jpeg"): unknown[] => [
+  { type: "text", text },
+  { type: "image_url", image_url: { url: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}` } },
+];
+
 export const askOmoProvider = async (
   name: string,
   model: string,
-  prompt: string,
+  prompt: string | readonly unknown[],
   timeoutMs: number,
   /** Room for the answer: a reasoning model spends most of it thinking, and a cut-off answer comes back empty. */
   maxTokens = 8_000,

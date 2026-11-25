@@ -4,6 +4,8 @@ import { parseQuick, volumeScript } from "../src/mac-quick.ts";
 
 test("quick commands are read from plain Korean; anything else is left to the head", () => {
   expect(parseQuick("화면 보여줘")).toEqual({ kind: "screen" });
+  expect(parseQuick("화면에 뭐 떠 있어?")).toEqual({ kind: "explain", question: "화면에 뭐 떠 있어" });
+  expect(parseQuick("이 에러 뭐야")).toEqual({ kind: "explain", question: "이 에러 뭐야" });
   expect(parseQuick("스크린샷 찍어줘")).toEqual({ kind: "screen" });
   expect(parseQuick("볼륨 30%")).toEqual({ kind: "volume", set: 30 });
   expect(parseQuick("소리 좀 줄여")).toEqual({ kind: "volume", by: -15 });

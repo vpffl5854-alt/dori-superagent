@@ -30,6 +30,7 @@ export const macDir = (config: DoriConfig, ...parts: string[]): string => {
   const dir = join(config.stateDir, "mac");
   mkdirSync(join(dir, "queue"), { recursive: true });
   mkdirSync(join(dir, "pending"), { recursive: true });
+  mkdirSync(join(dir, "consent"), { recursive: true });
   return join(dir, ...parts);
 };
 export const stopPath = (config: DoriConfig): string => macDir(config, "stop");

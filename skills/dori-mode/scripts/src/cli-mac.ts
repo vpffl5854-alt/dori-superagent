@@ -5,6 +5,7 @@ import type { DoriConfig } from "./config.ts";
 import { kstDay } from "./decisions.ts";
 import { findWindow, type MacTask, parseSteps, SELFTEST, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
+import { applyConsent, scanConsent } from "./mac-consent.ts";
 import { doAndReport } from "./mac-do.ts";
 import {
   decidePending,
@@ -23,6 +24,7 @@ import {
 import { run } from "./run.ts";
 
 type Recipes = Record<string, MacTask>;
+const CONSENT_EVERY_MS = 10_000;
 const recipesPath = (config: DoriConfig): string => macDir(config, "recipes.json");
 const readRecipes = (config: DoriConfig): Recipes =>
   existsSync(recipesPath(config)) ? (JSON.parse(readFileSync(recipesPath(config), "utf8")) as Recipes) : {};
@@ -88,8 +90,23 @@ const serve = async (config: DoriConfig): Promise<never> => {
   if (!inHerdr()) die("mac serve runs in a Herdr terminal (the 맥손 tab)");
   console.log("MAC_SERVE_READY");
   let nextTest = 0;
+  let nextConsent = 0;
   for (;;) {
     try {
+      // Permission prompts: new ones go to 도리방, the owner's presses are pressed (mac-consent.ts).
+      if (Date.now() >= nextConsent) {
+        nextConsent = Date.now() + CONSENT_EVERY_MS;
+        const path = enginePath((config as { mac?: { engine?: string } }).mac?.engine);
+        if (path) {
+          const { engine } = await openEngine(path);
+          try {
+            await applyConsent(engine, config);
+            await scanConsent(engine, config);
+          } finally {
+            await engine.close();
+          }
+        }
+      }
       const job = isStopped(config) ? undefined : dequeue(config);
       if (job) await ("goal" in job ? doAndReport(config, job.id, job.goal, job.send) : runAndReport(config, job));
       else if (Date.now() >= nextTest) {

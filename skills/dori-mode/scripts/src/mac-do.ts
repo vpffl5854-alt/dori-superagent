@@ -12,9 +12,10 @@ import { findWindow, type MacTask, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type GoalResult, runGoal } from "./mac-goal.ts";
 import { isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
-import { parseQuick, type Quick, volumeScript } from "./mac-quick.ts";
+import { explainPrompt, parseQuick, type Quick, volumeScript } from "./mac-quick.ts";
 import { runTask } from "./mac-run.ts";
-import { ask } from "./mac-think.ts";
+import { ask, type ThinkConfig } from "./mac-think.ts";
+import { askOmoProvider, withImage } from "./omo-provider.ts";
 import { run } from "./run.ts";
 
 type Learned = Record<string, MacTask>;
@@ -39,14 +40,29 @@ const openApp = async (app: string, background = true): Promise<boolean> => {
 };
 
 /** A quick command (mac-quick.ts) run at once, with its answer and, for the screen, a photo. */
-const runQuick = async (q: Quick): Promise<{ ok: boolean; text: string; photo?: Uint8Array<ArrayBuffer> }> => {
-  if (q.kind === "screen") {
+const runQuick = async (
+  q: Quick,
+  think?: ThinkConfig,
+): Promise<{ ok: boolean; text: string; photo?: Uint8Array<ArrayBuffer> }> => {
+  if (q.kind === "screen" || q.kind === "explain") {
     const file = join(tmpdir(), `mac-screen-${Date.now()}.jpg`);
     const r = await run(["screencapture", "-x", "-t", "jpg", file], { timeoutMs: 20_000 });
     if (r.code !== 0 || !existsSync(file)) return { ok: false, text: "화면을 못 찍었어요" };
+    // Small enough for a quick upload and a model's picture budget, big enough to read a dialog.
+    await run(["sips", "-Z", "1600", file], { timeoutMs: 20_000 });
     const photo = new Uint8Array(readFileSync(file));
     rmSync(file, { force: true });
-    return { ok: true, text: "지금 맥 화면이에요", photo };
+    if (q.kind === "screen") return { ok: true, text: "지금 맥 화면이에요", photo };
+    const t = think ?? {};
+    const a = await askOmoProvider(
+      t.provider ?? "hive2",
+      t.deepseekModel ?? "deepseek-ai/deepseek-v4.1-flash-1017",
+      withImage(explainPrompt(q.question), photo),
+      120_000,
+    );
+    return "text" in a
+      ? { ok: true, text: a.text, photo }
+      : { ok: false, text: `화면을 못 읽었어요: ${a.error}`, photo };
   }
   if (q.kind === "open") {
     const ok = await openApp(q.app, false);
@@ -129,7 +145,7 @@ export const doAndReport = async (config: DoriConfig, id: string, goal: string, 
   const chatId = bot?.cfg.chatId;
   const quick = parseQuick(goal);
   if (quick) {
-    const q = await runQuick(quick);
+    const q = await runQuick(quick, macConfig(config).think);
     console.log(`MAC_QUICK ${id} ${quick.kind} ok=${q.ok} ${q.text}`);
     if (bot && chatId)
       await (q.photo ? bot.tg.sendPhoto({ chatId }, q.photo, "screen.jpg", q.text) : bot.tg.send({ chatId }, q.text));

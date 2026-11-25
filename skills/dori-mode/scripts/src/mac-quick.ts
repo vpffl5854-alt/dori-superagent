@@ -5,6 +5,7 @@
  */
 export type Quick =
   | { readonly kind: "screen" }
+  | { readonly kind: "explain"; readonly question: string }
   | { readonly kind: "volume"; readonly set?: number; readonly by?: number }
   | { readonly kind: "mute"; readonly on: boolean }
   | { readonly kind: "open"; readonly app: string };
@@ -16,6 +17,9 @@ export const parseQuick = (goal: string): Quick | undefined => {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.!?~]+$/u, "");
+  // "화면에 뭐 떠 있어?", "이 에러 뭐야?": the screen photo goes to a model that reads pictures, with the question.
+  if (/(화면|창|에러|오류|경고|팝업)/.test(g) && /(뭐|무슨|무엇|설명|알려|읽어|왜|어떻게)/.test(g))
+    return { kind: "explain", question: g };
   if (/(화면|스크린샷|스샷|캡처)/.test(g) && /(보여|찍어|캡처|스샷|보내)/.test(g)) return { kind: "screen" };
   if (/음소거\s*(해제|풀어|꺼)/.test(g)) return { kind: "mute", on: false };
   if (/음소거|소리\s*(꺼|끄)/.test(g)) return { kind: "mute", on: true };
@@ -36,3 +40,12 @@ export const volumeScript = (q: Extract<Quick, { kind: "volume" | "mute" }>, cur
   q.kind === "mute"
     ? `set volume output muted ${q.on}`
     : `set volume output volume ${Math.max(0, Math.min(100, q.set ?? current + (q.by ?? 0)))}`;
+
+export const explainPrompt = (question: string): string =>
+  [
+    "이 사진은 지금 지브의 맥 화면이다. 지브의 질문에 한국어로, 쉬운 말로, 3~6줄로 답한다.",
+    `질문: ${question}`,
+    "에러나 경고 창이면: 무슨 뜻인지, 왜 떴을 것 같은지, 지브가 누르면 되는 버튼이나 할 일을 말한다.",
+    "권한·암호 창이면 무엇을 허락하는 창인지 말하고, 허용 여부는 지브가 정하게 둔다.",
+    "화면에 비밀번호·키·토큰처럼 보이는 글이 있으면 그대로 옮겨 적지 않는다.",
+  ].join("\n");
