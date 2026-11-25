@@ -5,6 +5,7 @@ import { type Command, die } from "./cli-context.ts";
 import { configPath, fill } from "./config.ts";
 import { fetchHttp } from "./messenger/http.ts";
 import { Telegram, type TgTarget } from "./messenger/telegram.ts";
+import { askRef } from "./omo-provider.ts";
 import { realClock, run } from "./run.ts";
 import { jobId, parseScript, parseTopics, ShortsError, type ShortsConfig, topicsMessage } from "./shorts.ts";
 import { applySetting, parseTime, SettingError, settingsText, viewSettings } from "./shorts-settings.ts";
@@ -90,12 +91,14 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       // Two topics steered by what is popular in the owner's interests, the rest from "everything in the world".
       const titles = trendTitles(join(config.stateDir, "sns", "latest"), cfg.interests ?? [], Date.now());
       const picked: string[] = [];
-      if (titles.length > 0 && cfg.omo) {
-        const r = await run(
-          [cfg.omo, "--model", cfg.scriptModel ?? config.defaultModel, "-p", trendPrompt(titles, cfg.interests ?? [])],
-          { timeoutMs: TREND_MODEL_MS },
+      // Models are asked directly (omo-provider.ts): `omo -p` starts a whole agent, and this slot timed out on it (exit 124).
+      if (titles.length > 0) {
+        const out = await askRef(
+          cfg.scriptModel ?? config.defaultModel,
+          trendPrompt(titles, cfg.interests ?? []),
+          TREND_MODEL_MS,
         );
-        for (const word of parseHeadwords(r.out).sort(() => Math.random() - 0.5)) {
+        for (const word of parseHeadwords(out).sort(() => Math.random() - 0.5)) {
           if (picked.length >= 2) break;
           const page = await wikiPage(fetchHttp, word).catch(() => null);
           if (page && page.extract.length >= MIN_EXTRACT && !picked.includes(page.title)) picked.push(page.title);
@@ -127,14 +130,11 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
     if (sub === "wiki-script") {
       const [, title = die("wiki-script needs a title"), out = die("wiki-script needs an output path")] = positionals;
       const prompt = scriptPrompt(await wikiPage(fetchHttp, title));
-      const omo = cfg.omo ?? "omo";
       let last = "";
       for (let attempt = 0; attempt < 2; attempt++) {
-        const r = await run([omo, "--model", cfg.scriptModel ?? config.defaultModel, "-p", prompt], {
-          timeoutMs: 180_000,
-        });
+        const answer = await askRef(cfg.scriptModel ?? config.defaultModel, prompt, 180_000);
         try {
-          const json = extractJson(r.out);
+          const json = extractJson(answer);
           parseScript(json);
           return void writeFileSync(out, json);
         } catch (e) {

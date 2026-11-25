@@ -56,3 +56,12 @@ export const askOmoProvider = async (
     return { error: `${name}: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) };
   }
 };
+
+/** The answer text to a question for a "provider/model" ref, or "" when the model could not be asked. */
+export const askRef = async (ref: string, prompt: string, timeoutMs: number, maxTokens = 16_000): Promise<string> => {
+  const m = splitModel(ref);
+  if (!m) return "";
+  const r = await askOmoProvider(m.provider, m.model, prompt, timeoutMs, maxTokens);
+  if ("error" in r) console.log(`MODEL_ASK_FAILED ${r.error}`);
+  return "text" in r ? r.text : "";
+};
