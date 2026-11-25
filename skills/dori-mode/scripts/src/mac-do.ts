@@ -3,13 +3,16 @@
  * model at all; if the replay fails (the app changed), the head works it out again. A success made only of presses
  * in one app is learned for next time. 도리방 gets the before/after photos, what was done, and which model decided.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dorichatBot } from "./dorichat-bot.ts";
 import type { DoriConfig } from "./config.ts";
 import { findWindow, type MacTask, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type GoalResult, runGoal } from "./mac-goal.ts";
 import { isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
+import { parseQuick, type Quick, volumeScript } from "./mac-quick.ts";
 import { runTask } from "./mac-run.ts";
 import { ask } from "./mac-think.ts";
 import { run } from "./run.ts";
@@ -26,12 +29,36 @@ export const goalKey = (goal: string): string =>
     .toLowerCase();
 
 /** Opens an app in the background; a Korean name ("계산기") is found through Spotlight's localized names. */
-const openApp = async (app: string): Promise<void> => {
-  if ((await run(["open", "-g", "-a", app], { timeoutMs: 20_000 })).code === 0) return;
+const openApp = async (app: string, background = true): Promise<boolean> => {
+  const bg = background ? ["-g"] : [];
+  if ((await run(["open", ...bg, "-a", app], { timeoutMs: 20_000 })).code === 0) return true;
   const found = (await run(["mdfind", "-name", app], { timeoutMs: 20_000 })).out
     .split("\n")
     .find((p) => p.endsWith(".app"));
-  if (found) await run(["open", "-g", found], { timeoutMs: 20_000 });
+  return found ? (await run(["open", ...bg, found], { timeoutMs: 20_000 })).code === 0 : false;
+};
+
+/** A quick command (mac-quick.ts) run at once, with its answer and, for the screen, a photo. */
+const runQuick = async (q: Quick): Promise<{ ok: boolean; text: string; photo?: Uint8Array<ArrayBuffer> }> => {
+  if (q.kind === "screen") {
+    const file = join(tmpdir(), `mac-screen-${Date.now()}.jpg`);
+    const r = await run(["screencapture", "-x", "-t", "jpg", file], { timeoutMs: 20_000 });
+    if (r.code !== 0 || !existsSync(file)) return { ok: false, text: "화면을 못 찍었어요" };
+    const photo = new Uint8Array(readFileSync(file));
+    rmSync(file, { force: true });
+    return { ok: true, text: "지금 맥 화면이에요", photo };
+  }
+  if (q.kind === "open") {
+    const ok = await openApp(q.app, false);
+    return { ok, text: ok ? `${q.app}을(를) 열었어요` : `${q.app}을(를) 못 찾았어요` };
+  }
+  const osa = (script: string) => run(["osascript", "-e", script], { timeoutMs: 10_000 });
+  const before = Number((await osa("output volume of (get volume settings)")).out) || 0;
+  const r = await osa(volumeScript(q, before));
+  if (r.code !== 0) return { ok: false, text: "소리를 못 바꿨어요" };
+  if (q.kind === "mute") return { ok: true, text: q.on ? "음소거했어요" : "음소거를 풀었어요" };
+  const after = Number((await osa("output volume of (get volume settings)")).out) || 0;
+  return { ok: true, text: `볼륨 ${before} → ${after}` };
 };
 
 export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResult & { replayed: boolean }> => {
@@ -74,7 +101,7 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
     const g = await runGoal(engine, goal, {
       ...base,
       think: (tier, p) => ask(tier, c.think ?? {}, p, run, macDir(config)),
-      openApp: (app) => openApp(app),
+      openApp: async (app) => void (await openApp(app)),
       hold: async (task) => void (await submit(config, task, true)),
     });
     if (g.ok && g.recipe)
@@ -98,11 +125,19 @@ export const goalReport = (goal: string, g: GoalResult & { replayed: boolean }):
   ].join("\n");
 
 export const doAndReport = async (config: DoriConfig, id: string, goal: string, send: boolean): Promise<boolean> => {
+  const bot = send ? dorichatBot(config) : undefined;
+  const chatId = bot?.cfg.chatId;
+  const quick = parseQuick(goal);
+  if (quick) {
+    const q = await runQuick(quick);
+    console.log(`MAC_QUICK ${id} ${quick.kind} ok=${q.ok} ${q.text}`);
+    if (bot && chatId)
+      await (q.photo ? bot.tg.sendPhoto({ chatId }, q.photo, "screen.jpg", q.text) : bot.tg.send({ chatId }, q.text));
+    return q.ok;
+  }
   const g = await doGoal(config, goal);
   const text = goalReport(goal, g);
   console.log(`MAC_DO ${id} ok=${g.ok} tiers=${g.tiers.join(">") || "recipe"}\n${text}`);
-  const bot = send ? dorichatBot(config) : undefined;
-  const chatId = bot?.cfg.chatId;
   if (bot && chatId) {
     if (g.before) await bot.tg.sendPhoto({ chatId }, g.before, "before.png", "하기 전");
     if (g.after) await bot.tg.sendPhoto({ chatId }, g.after, "after.png", text);
