@@ -5,13 +5,16 @@ import type { DoriConfig } from "./config.ts";
 import { kstDay } from "./decisions.ts";
 import { findWindow, type MacTask, parseSteps, SELFTEST, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
+import { doAndReport } from "./mac-do.ts";
 import {
   decidePending,
   dequeue,
+  enqueue,
   execute,
   inHerdr,
   isStopped,
   macDir,
+  newId,
   report,
   runAndReport,
   stopPath,
@@ -88,7 +91,7 @@ const serve = async (config: DoriConfig): Promise<never> => {
   for (;;) {
     try {
       const job = isStopped(config) ? undefined : dequeue(config);
-      if (job) await runAndReport(config, job);
+      if (job) await ("goal" in job ? doAndReport(config, job.id, job.goal, job.send) : runAndReport(config, job));
       else if (Date.now() >= nextTest) {
         nextTest = Date.now() + 3_600_000;
         await selftest(config, true);
@@ -116,6 +119,16 @@ const mac: Command = async ({ positionals, opt, values, config }) => {
       );
     });
   if (sub === "press") return printSubmitted(await submit(config, taskFrom(opt), send));
+  if (sub === "do") {
+    const goal = opt("text") ?? die('do needs --text "맥에서 할 일"');
+    const id = newId();
+    if (!inHerdr()) {
+      enqueue(config, { id, goal, send });
+      return void console.log(`MAC_QUEUED ${id}`);
+    }
+    if (!(await doAndReport(config, id, goal, send))) process.exitCode = 1;
+    return;
+  }
   if (sub === "recipe" && a === "save" && b) {
     writeFileSync(recipesPath(config), JSON.stringify({ ...readRecipes(config), [b]: taskFrom(opt) }, null, 2));
     return void console.log(`MAC_RECIPE_SAVED ${b}`);
@@ -145,7 +158,7 @@ const mac: Command = async ({ positionals, opt, values, config }) => {
   if (sub === "selftest") return selftest(config, values["report"] === true);
   if (sub === "serve") return serve(config);
   die(
-    "mac windows | look --app A | press --app A --steps S [--expect V] [--no-send] | recipe save|run N | recipe list | stop | resume | approve|drop ID | selftest [--report] | serve",
+    "mac windows | look --app A | do --text G | press --app A --steps S [--expect V] [--no-send] | recipe save|run N | recipe list | stop | resume | approve|drop ID | selftest [--report] | serve",
   );
 };
 

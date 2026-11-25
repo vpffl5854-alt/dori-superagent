@@ -10,6 +10,7 @@ import type { DoriConfig } from "./config.ts";
 import { approvalText, dangerousSteps, type MacTask, macCallback, reportText } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type RunResult, runTask } from "./mac-run.ts";
+import type { ThinkConfig } from "./mac-think.ts";
 
 export type MacConfig = {
   /** The engine binary; the newest one OmO installed when unset. */
@@ -17,10 +18,14 @@ export type MacConfig = {
   /** One wait for the owner (ms) and how many a task may spend. */
   readonly waitMs?: number;
   readonly maxWaits?: number;
+  /** The models the head asks (mac-think.ts). */
+  readonly think?: ThinkConfig;
 };
-type Job = { readonly id: string; readonly task: MacTask; readonly send: boolean };
+type TaskJob = { readonly id: string; readonly task: MacTask; readonly send: boolean };
+/** A queued job is a task with its steps, or a spoken request the head works out (mac-do.ts). */
+export type Job = TaskJob | { readonly id: string; readonly goal: string; readonly send: boolean };
 
-const cfgOf = (config: DoriConfig): MacConfig => (config as { mac?: MacConfig }).mac ?? {};
+export const macConfig = (config: DoriConfig): MacConfig => (config as { mac?: MacConfig }).mac ?? {};
 export const macDir = (config: DoriConfig, ...parts: string[]): string => {
   const dir = join(config.stateDir, "mac");
   mkdirSync(join(dir, "queue"), { recursive: true });
@@ -35,7 +40,7 @@ export const newId = (now = new Date()): string =>
 export const inHerdr = (env = process.env): boolean => Boolean(env["HC_TERMINAL_ID"] ?? env["HERDR_PANE_ID"]);
 
 export const execute = async (config: DoriConfig, task: MacTask, photos = true): Promise<RunResult> => {
-  const c = cfgOf(config);
+  const c = macConfig(config);
   const path = enginePath(c.engine);
   if (!path) return { ok: false, shown: [], note: "OmO 화면 엔진을 못 찾았어요", waited: 0 };
   const { engine, caps } = await openEngine(path);
@@ -65,15 +70,20 @@ export const report = async (config: DoriConfig, task: MacTask, r: RunResult, he
   else await bot.tg.send({ chatId }, text);
 };
 
-export const runAndReport = async (config: DoriConfig, job: Job): Promise<RunResult> => {
+export const runAndReport = async (config: DoriConfig, job: TaskJob): Promise<RunResult> => {
   const r = await execute(config, job.task);
   console.log(`MAC_RESULT ${job.id} ok=${r.ok} waited=${r.waited} ${r.note}`.trim());
   if (job.send) await report(config, job.task, r);
   return r;
 };
 
+let queued = 0;
+/** Named by time, then by order within this process, so jobs queued in the same millisecond keep their order. */
 export const enqueue = (config: DoriConfig, job: Job): void =>
-  writeFileSync(macDir(config, "queue", `${Date.now()}-${job.id}.json`), JSON.stringify(job));
+  writeFileSync(
+    macDir(config, "queue", `${Date.now()}-${String(queued++).padStart(6, "0")}-${job.id}.json`),
+    JSON.stringify(job),
+  );
 
 /** Takes the oldest queued job off the queue (a crash loses it rather than pressing twice). */
 export const dequeue = (config: DoriConfig): Job | undefined => {

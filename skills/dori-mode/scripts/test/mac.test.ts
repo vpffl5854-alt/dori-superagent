@@ -52,6 +52,11 @@ test("an app is found by its exact name first, then loosely", () => {
   expect(findWindow(wins, "calculator")?.id).toBe("2");
   expect(findWindow(wins, "pro")?.id).toBe("1");
   expect(findWindow(wins, "계산기")).toBeUndefined();
+  const twice = [
+    { id: "308", app: "계산기", title: "", focused: false },
+    { id: "307", app: "계산기", title: "계산기", focused: false },
+  ];
+  expect(findWindow(twice, "계산기")?.id).toBe("307");
 });
 
 test("도리방 stop words are exact; button data reads back only for a mac approval", () => {

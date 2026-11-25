@@ -81,6 +81,10 @@ const USAGE = `dori <command> [options]
   decisions                            print the decision ledger
   notify --level now|later --text T    an alert: now = 도리방 at once, later = in the next morning briefing
   mac windows | look --app A          Mac windows, or one app's controls by name (OmO desktop engine, inside Herdr)
+  mac do --text "계산기로 6 곱하기 7" [--no-send]
+                                       a spoken request: DeepSeek picks one action at a time from the controls by name,
+                                       Sonnet after two failures (or when the text says 소넷); a repeat runs its learned steps;
+                                       도리방 "맥 …" / "맥에서 …" queues the same for 맥손
   mac press --app A --steps "a,b|c" [--expect V] [--no-send]
                                        press controls by name in the background, before/after photos to 도리방;
                                        a pay/delete/send/post step waits for 진행 in 도리방; outside Herdr it queues for 맥손

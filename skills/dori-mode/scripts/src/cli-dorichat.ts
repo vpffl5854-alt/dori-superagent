@@ -15,7 +15,8 @@ import {
 } from "./dorichat.ts";
 import { rememberText } from "./decisions.ts";
 import { parseMacPress, stopWord } from "./mac.ts";
-import { decidePending, stopPath } from "./mac-jobs.ts";
+import { macGoal } from "./mac-brain.ts";
+import { decidePending, enqueue, newId, stopPath } from "./mac-jobs.ts";
 import { type DorichatConfig, dorichatBot } from "./dorichat-bot.ts";
 import type { Telegram } from "./messenger/telegram.ts";
 import { run } from "./run.ts";
@@ -128,6 +129,13 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
       { chatId: m.chat.id },
       sw === "stop" ? '맥 조작을 멈췄어요. 다시 하려면 "재개"' : "맥 조작을 다시 할 수 있어요",
     );
+  const goal = macGoal(m.text);
+  if (goal) {
+    const id = newId();
+    enqueue(config, { id, goal, send: true });
+    console.log(`DORICHAT_MAC_DO ${id}`);
+    return void (await tg.send({ chatId: m.chat.id }, `맥손에게 넘겼어요 (${id}). 끝나면 사진과 함께 알려 드릴게요`));
+  }
   const remember = rememberText(m.text);
   if (remember) {
     appendDecision(config, remember, "도리방");

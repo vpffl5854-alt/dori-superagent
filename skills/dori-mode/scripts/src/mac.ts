@@ -42,10 +42,15 @@ export const shownValues = (snapshot: string): string[] =>
 
 export type Win = { readonly id: string; readonly app: string; readonly title: string; readonly focused: boolean };
 
-/** The app's window; an app name matches its Korean or English name loosely ("계산기" or "Calculator"). */
+/**
+ * The app's window; an app name matches its Korean or English name loosely ("계산기" or "Calculator"). A window
+ * with a title comes first: an app opened twice can list an untitled window the accessibility tree does not know.
+ */
 export const findWindow = (wins: readonly Win[], app: string): Win | undefined => {
   const a = app.toLowerCase();
-  return wins.find((w) => w.app.toLowerCase() === a) ?? wins.find((w) => w.app.toLowerCase().includes(a));
+  const exact = wins.filter((w) => w.app.toLowerCase() === a);
+  const loose = exact.length ? exact : wins.filter((w) => w.app.toLowerCase().includes(a));
+  return loose.find((w) => w.title.trim()) ?? loose[0];
 };
 
 /** 도리방 words for the stop switch: "멈춰" stops every Mac action, "재개" lets them run again. */
