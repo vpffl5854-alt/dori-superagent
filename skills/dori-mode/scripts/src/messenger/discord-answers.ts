@@ -19,7 +19,7 @@ import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
 import { lastAnswer, postAnswer, sessionSize } from "./discord-reply.ts";
 import { resolveLeadRef, sessionPathFor } from "./discord-pane.ts";
-import { note, type Pending, pendingPath, readPending, writePending } from "./discord-answers-state.ts";
+import { note, type Pending, pendingPath, readPending, tooOld, writePending } from "./discord-answers-state.ts";
 
 const POLL_MS = 1_500;
 const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -99,8 +99,11 @@ export const startDiscordReplies = (
   const target = async (): Promise<SessionRef | undefined> => await resolveLeadRef(config, rts).catch(() => undefined);
   let stopped = false;
   const posted = new Set<string>();
+  /** One answer goes to the room once: several messages handed over in one turn all read the turn's last answer. */
+  const postedText = new Map<string, string>();
 
   const enqueue = async (item: Omit<Pending, "offset">): Promise<boolean> => {
+    if (tooOld(stateDir, item.messageId)) return true;
     const ref = await target();
     if (!ref) return false;
     // Read before the hand-off: a working pane answers the next prompt in the turn it is already running, so the
@@ -158,7 +161,7 @@ export const startDiscordReplies = (
     return undefined;
   };
 
-  const enqueueBot = botAnswerer({
+  const answerBot = botAnswerer({
     discord,
     stateDir,
     selfId: config.discordSelfId ?? "",
@@ -203,9 +206,16 @@ export const startDiscordReplies = (
       // The same answer is never posted twice for one message: a retry after a failed post, or a second pass over the
       // same entry, would put the same words in the room again.
       if (posted.has(item.messageId)) return true;
+      const twin = postedText.get(text.trim());
+      if (twin) {
+        posted.add(item.messageId);
+        note(stateDir, `same answer as for ${twin}: not posted again for ${item.messageId}`);
+        return true;
+      }
       try {
         const ids = await postAnswer(discord, item.channel, item.messageId, text);
         posted.add(item.messageId);
+        postedText.set(text.trim(), item.messageId);
         note(stateDir, `posted ${ids.length} message(s) for ${item.messageId}`);
       } catch (e) {
         note(stateDir, `post failed for ${item.messageId}: ${(e as Error).message}`);
@@ -234,6 +244,6 @@ export const startDiscordReplies = (
       stopped = true;
     },
     enqueue,
-    enqueueBot,
+    enqueueBot: async (inbound) => tooOld(stateDir, inbound.messageId) || (await answerBot(inbound)),
   };
 };

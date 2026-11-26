@@ -152,11 +152,23 @@ export const openGatewaySocket = (): GatewaySocket => {
   const ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
   let handler: (d: string) => void = () => {};
   ws.addEventListener("message", (e) => handler(String(e.data)));
+  let closed: (why: string) => void = () => {};
+  let told = false;
+  const tell = (why: string) => {
+    if (told) return;
+    told = true;
+    closed(why);
+  };
+  ws.addEventListener("close", (e) => tell(`closed ${e.code}${e.reason ? ` ${e.reason}` : ""}`));
+  ws.addEventListener("error", () => tell("error"));
   return {
     send: (d) => ws.send(d),
     close: () => ws.close(),
     onMessage: (cb) => {
       handler = cb;
+    },
+    onClose: (cb) => {
+      closed = cb;
     },
   };
 };

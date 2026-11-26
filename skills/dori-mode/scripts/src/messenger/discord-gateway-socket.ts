@@ -2,13 +2,14 @@
  * The gateway socket's own work, as a mixin: connecting, reading the payloads, heartbeats, identify/resume and the
  * reconnect backoff. `DiscordInbound` adds the backfill and media; this file only knows the socket.
  */
-import type { Clock, GatewayPayload, GatewaySocket } from "./discord-gateway.ts";
+import type { GatewayPayload, GatewaySocket } from "./discord-gateway.ts";
 import {
   DEFAULT_HEARTBEAT_MS,
   DISCORD_INBOUND_INTENTS,
   EVENT_MESSAGE_CREATE,
   EVENT_READY,
   HEALTHY_SESSION_MS,
+  HELLO_TIMEOUT_MS,
   OP_DISPATCH,
   OP_HEARTBEAT,
   OP_HEARTBEAT_ACK,
@@ -22,29 +23,11 @@ import {
   SESSION_START_LIMIT,
   SESSION_START_WINDOW_MS,
 } from "./discord-gateway.ts";
+import type { GatewayHost, GatewayState, GatewayWiring } from "./discord-gateway-state.ts";
+import { cancel, later } from "./discord-gateway-timers.ts";
 import { asRecord } from "./discord-message.ts";
 
-export type GatewayState = {
-  socket: GatewaySocket | null;
-  beat: unknown;
-  sequence: number | null;
-  sessionId: string | null;
-  acked: boolean;
-  stopped: boolean;
-  attempts: number;
-  connectedAt: number;
-  sessionStarts: number[];
-  restartTimer: unknown;
-};
-
-export type GatewayWiring = {
-  readonly open: () => GatewaySocket;
-  readonly token: string;
-  readonly clock: Clock;
-  readonly onEvent: (line: string) => void;
-};
-
-export type GatewayHost = GatewayState & GatewayWiring & { report(data: unknown): boolean };
+export type { GatewayHost, GatewayState, GatewayWiring } from "./discord-gateway-state.ts";
 
 export const gatewaySocketLoop = (host: GatewayHost): GatewaySocketLoop =>
   new GatewaySocketLoop(host, host, (d) => host.report(d));
@@ -64,13 +47,10 @@ export class GatewaySocketLoop {
   stop(): void {
     const s = this.state;
     s.stopped = true;
+    this.drop("helloTimer");
     if (s.beat !== undefined) this.wiring.clock.clearInterval(s.beat);
     s.beat = undefined;
-    if (s.restartTimer !== undefined) {
-      if (this.wiring.clock.clearTimeout) this.wiring.clock.clearTimeout(s.restartTimer);
-      else clearTimeout(s.restartTimer as ReturnType<typeof setTimeout>);
-      s.restartTimer = undefined;
-    }
+    this.drop("restartTimer");
     s.socket?.close();
     s.socket = null;
   }
@@ -85,6 +65,7 @@ export class GatewaySocketLoop {
     if (typeof payload.s === "number") this.state.sequence = payload.s;
 
     if (payload.op === OP_HELLO) {
+      this.drop("helloTimer");
       this.startHeartbeat(payload.d);
       return;
     }
@@ -125,11 +106,7 @@ export class GatewaySocketLoop {
   private connect(): void {
     const s = this.state;
     if (s.stopped) return;
-    if (s.restartTimer !== undefined) {
-      if (this.wiring.clock.clearTimeout) this.wiring.clock.clearTimeout(s.restartTimer);
-      else clearTimeout(s.restartTimer as ReturnType<typeof setTimeout>);
-      s.restartTimer = undefined;
-    }
+    this.drop("restartTimer");
     s.connectedAt = this.tick();
     const socket = this.wiring.open();
     s.socket = socket;
@@ -137,6 +114,28 @@ export class GatewaySocketLoop {
       if (s.stopped || s.socket !== socket) return;
       this.handle(raw);
     });
+    // Without these a socket that closes, fails, or never says hello leaves no heartbeat to notice it: the loop
+    // stayed silent for nine hours after one reconnect (2026-11-26).
+    socket.onClose?.((why) => {
+      if (s.stopped || s.socket !== socket) return;
+      this.wiring.onEvent(`gateway socket ${why}; reconnecting`);
+      this.reconnect();
+    });
+    this.drop("helloTimer");
+    s.helloTimer = later(this.wiring.clock, () => this.noHello(socket), HELLO_TIMEOUT_MS);
+  }
+
+  private noHello(socket: GatewaySocket): void {
+    this.state.helloTimer = undefined;
+    if (this.state.stopped || this.state.socket !== socket) return;
+    this.wiring.onEvent(`gateway sent no hello in ${HELLO_TIMEOUT_MS}ms; reconnecting`);
+    this.reconnect();
+  }
+
+  private drop(timer: "restartTimer" | "helloTimer"): void {
+    if (this.state[timer] === undefined) return;
+    cancel(this.wiring.clock, this.state[timer]);
+    this.state[timer] = undefined;
   }
 
   private startHeartbeat(d: Record<string, unknown> | null | undefined): void {
@@ -208,6 +207,7 @@ export class GatewaySocketLoop {
   private reconnect(): void {
     const s = this.state;
     if (s.stopped) return;
+    this.drop("helloTimer");
     if (s.beat !== undefined) this.wiring.clock.clearInterval(s.beat);
     s.beat = undefined;
     s.socket?.close();
@@ -220,7 +220,7 @@ export class GatewaySocketLoop {
       if (s.stopped) return;
       this.connect();
     };
-    s.restartTimer = this.wiring.clock.setTimeout ? this.wiring.clock.setTimeout(fire, delay) : setTimeout(fire, delay);
+    s.restartTimer = later(this.wiring.clock, fire, delay);
   }
 
   private send(payload: Record<string, unknown>): void {

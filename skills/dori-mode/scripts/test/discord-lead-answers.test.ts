@@ -195,3 +195,40 @@ test("a room message quoting code still reaches the lane, with look-alikes for t
     expect(delivered.join("\n")).toContain("모델은 ˋdeepseek-v4.1ˋ 이고 $ (whoami) 는 실행 안 됨");
     expect(delivered.join("\n")).not.toMatch(/`|\$\(/);
   }));
+
+test("several messages handed over in one turn get the turn's one answer once, not once each", () =>
+  withState(async (stateDir) => {
+    const sessionLog = join(stateDir, "lead.jsonl");
+    const assistant = (text: string) =>
+      `${JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text }] } })}\n`;
+    writeFileSync(sessionLog, "");
+    const { http, seen } = fakeHttp(() => ok({ id: "99" }));
+    let status = "working";
+    const rts = {
+      for: () => ({
+        list: async () => [{ ref: { runtime: "hc", id: "t77" }, status }],
+        deliver: async () => ({ kind: "delivered" }),
+        read: async () => "",
+      }),
+    } as unknown as ChosenRuntimes;
+    const replies = startDiscordReplies(
+      new Discord(http, { now: () => 0, sleep: async () => {} }, "t"),
+      stateDir,
+      { ...config(stateDir), leadPane: "hc:t77" },
+      undefined,
+      rts,
+      10,
+    );
+    try {
+      for (const id of ["21", "22", "23", "24"])
+        expect(await replies.enqueue({ channel: "c1", messageId: id, sessionPath: sessionLog })).toBe(true);
+      appendFileSync(sessionLog, assistant("응, 지금 새 계정 만들고 9시에 신청하는 흐름이 맞아."));
+      status = "idle";
+      const deadline = Date.now() + 3_000;
+      while (posts(seen).length === 0 && Date.now() < deadline) await Bun.sleep(5);
+      await Bun.sleep(300);
+    } finally {
+      replies.stop();
+    }
+    expect(posts(seen)).toHaveLength(1);
+  }));

@@ -52,6 +52,8 @@ export type GatewaySocket = {
   send(data: string): void;
   close(): void;
   onMessage(cb: (data: string) => void): void;
+  /** Called once when the socket closes or fails, whoever closed it; the loop then reconnects. */
+  onClose?(cb: (why: string) => void): void;
 };
 
 export type Clock = {
@@ -105,6 +107,8 @@ export const MAX_SEEN = 500;
  * 1-5s (random) when told to reconnect, back off on repeated failures, and must not exceed 1000
  * RESUME/IDENTIFY attempts in 24h or the token is reset. Without this the bridge reconnected in a
  * tight loop and Discord reset the bot token (2026-11-08, robin). */
+/** A socket with no hello by then is dead (a network blip mid-reconnect): it is closed and replaced. */
+export const HELLO_TIMEOUT_MS = 30_000;
 export const RECONNECT_BASE_MS = 1_000;
 export const RECONNECT_MAX_MS = 60_000;
 export const SESSION_START_WINDOW_MS = 24 * 60 * 60 * 1000;
