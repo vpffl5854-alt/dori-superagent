@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { prompt } from "../src/mac-brain.ts";
+import { parseAct, prompt } from "../src/mac-brain.ts";
 import type { Engine, Reply } from "../src/mac-engine.ts";
 import { type GoalDeps, runGoal } from "../src/mac-goal.ts";
 
@@ -63,4 +63,14 @@ test("Discord's question carries how to reach a channel: the Quick Switcher, not
   const p = prompt("g", ["Discord"], "Discord", '- link "3인방 (채팅 채널)" [ref=e2]', "", [], []);
   expect(p).toContain('key ["cmd","k"]');
   expect(prompt("g", ["계산기"], "계산기", "", "", [], [])).not.toContain("Quick Switcher");
+});
+
+test("open takes a web address for the browser, made whole; anything else is dropped", () => {
+  expect(parseAct('{"do":"open","app":"Safari","url":"news.hada.io"}')).toEqual({
+    do: "open",
+    app: "Safari",
+    url: "https://news.hada.io",
+  });
+  expect(parseAct('{"do":"open","app":"Safari","url":"file:///etc/passwd"}')).toEqual({ do: "open", app: "Safari" });
+  expect(parseAct('{"do":"open","app":"Safari","url":"rm -rf /"}')).toEqual({ do: "open", app: "Safari" });
 });

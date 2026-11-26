@@ -49,7 +49,7 @@ export const menuView = async (e: Engine, windowId: string): Promise<string> => 
 };
 
 export type ActCtx = RunOpts & {
-  readonly openApp: (app: string) => Promise<void>;
+  readonly openApp: (app: string, url?: string) => Promise<void>;
   readonly hold: (task: MacTask) => Promise<void>;
   /** The windows and the reading of the app the model was shown this turn. */
   readonly wins: readonly Win[];
@@ -71,7 +71,7 @@ export type ActResult = {
 
 export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }>, c: ActCtx): Promise<ActResult> => {
   if (act.do === "open") {
-    await c.openApp(act.app);
+    await c.openApp(act.app, act.url);
     // An app started cold can take seconds to show its first window (TextEdit's open panel does).
     let ok = false;
     for (let i = 0; i < 8 && !ok; i++) {

@@ -46,13 +46,14 @@ export const shownAppName = async (app: string): Promise<string> => {
   return shown && shown !== "(null)" ? shown.replace(/\.app$/, "").normalize("NFC") : app;
 };
 
-const openApp = async (app: string, background = true): Promise<boolean> => {
+const openApp = async (app: string, background = true, url?: string): Promise<boolean> => {
   const bg = background ? ["-g"] : [];
-  if ((await run(["open", ...bg, "-a", app], { timeoutMs: 20_000 })).code === 0) return true;
+  const page = url ? [url] : [];
+  if ((await run(["open", ...bg, "-a", app, ...page], { timeoutMs: 20_000 })).code === 0) return true;
   const found = (await run(["mdfind", "-name", app], { timeoutMs: 20_000 })).out
     .split("\n")
     .find((p) => p.endsWith(".app"));
-  return found ? (await run(["open", ...bg, found], { timeoutMs: 20_000 })).code === 0 : false;
+  return found ? (await run(["open", ...bg, "-a", found, ...page], { timeoutMs: 20_000 })).code === 0 : false;
 };
 
 /** A quick command (mac-quick.ts) run at once, with its answer and, for the screen, a photo. */
@@ -134,7 +135,7 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
     const g = await runGoal(engine, goal, {
       ...base,
       think: (tier, p) => ask(tier, c.think ?? {}, p, run, macDir(config)),
-      openApp: async (app) => void (await openApp(app)),
+      openApp: async (app, url) => void (await openApp(app, true, url)),
       appName: shownAppName,
       autoSend: c.autoSend ?? false,
       hold: async (task) => void (await submit(config, task, true)),

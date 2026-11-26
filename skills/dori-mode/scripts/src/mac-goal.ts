@@ -25,7 +25,7 @@ import type { Thought } from "./mac-think.ts";
 
 export type GoalDeps = RunOpts & {
   readonly think: (tier: Tier, prompt: string) => Promise<Thought>;
-  readonly openApp: (app: string) => Promise<void>;
+  readonly openApp: (app: string, url?: string) => Promise<void>;
   /** Hold a dangerous step for the owner's 진행. */
   readonly hold: (task: MacTask) => Promise<void>;
   /** The name the Mac shows for an app the model named in English or Korean ("TextEdit" -> "텍스트 편집기"). */

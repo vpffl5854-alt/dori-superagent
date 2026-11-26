@@ -11,7 +11,7 @@
  */
 
 export type Act =
-  | { readonly do: "open"; readonly app: string }
+  | { readonly do: "open"; readonly app: string; readonly url?: string }
   | { readonly do: "look"; readonly app: string; readonly window?: string }
   | { readonly do: "press"; readonly app: string; readonly step: string }
   | { readonly do: "type"; readonly app: string; readonly field: string; readonly text: string }
@@ -121,6 +121,7 @@ export const prompt = (
     'Answer with ONE JSON object and nothing else: {"reflect":"<Korean, one line>", ...one action..., "plan":[...]?}',
     "Actions (put the fields next to reflect):",
     '"do":"open","app":"<app name>"            open an app in the background (Korean or English name)',
+    '   add "url":"https://..." to open a web page in that browser (never type into the address bar)',
     '"do":"look","app":"<app name>"            switch to another app (the app you work in is shown again every turn)',
     '   add "window":"<title>" to work in another of that app\'s windows (its windows are listed above)',
     '"do":"press","app":"<app>","step":"<exact control name, or its ref like e12 when it has no name>"',
@@ -136,6 +137,15 @@ export const prompt = (
     "Never answer a permission or password prompt (허용, Allow, 암호): stop with fail and say what it asks; the owner decides.",
     "Never type into a field that already shows text (it is the owner's own writing) unless the goal says to change it.",
   ].join("\n");
+
+/** A web address the model gave, made whole ("news.hada.io" -> "https://news.hada.io"); only http and https. */
+const webUrl = (v: unknown): string | undefined => {
+  if (typeof v !== "string" || !v.trim() || /\s/.test(v.trim())) return undefined;
+  const u = /^[a-z][a-z0-9+.-]*:/i.test(v.trim()) ? v.trim() : `https://${v.trim()}`;
+  return /^https?:\/\/[^/]+\.[^/]+/i.test(u) ? u : undefined;
+};
+
+const withUrl = (url: string | undefined): { url?: string } => (url ? { url } : {});
 
 const str = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 const strs = (v: unknown): string[] | undefined =>
@@ -171,7 +181,7 @@ export const parseDecision = (answer: string): Decision | undefined => {
   const app = str(o["app"]) ? o["app"].trim() : undefined;
   const act: Act | undefined =
     d === "open" && app
-      ? { do: d, app }
+      ? { do: d, app, ...withUrl(webUrl(o["url"])) }
       : d === "look" && app
         ? { do: d, app, ...(str(o["window"]) ? { window: o["window"].trim() } : {}) }
         : d === "press" && app && str(o["step"])
@@ -214,7 +224,7 @@ export const actLine = (a: Act): string =>
         : a.do === "key"
           ? `${a.app}: 단축키 ${a.keys.join("+")}`
           : a.do === "open"
-            ? `${a.app} 열기`
+            ? `${a.app} 열기${a.url ? ` (${a.url})` : ""}`
             : a.do === "look"
               ? `${a.app}${a.window ? ` "${a.window}" 창` : ""} 보기`
               : a.do === "done"
