@@ -74,9 +74,9 @@ export const tipPrompt = (goal: string, app: string, turns: readonly Turn[]): st
     "What was done, in order (action -> result):",
     ...turns.map((t, i) => `${i + 1}. ${t.act} -> ${t.result}`),
     "",
-    `Write ONE line for the next task in "${app}": which way works there and which does not, in English, at most 40`,
-    'words, naming the actions (press, type, key ["cmd","k"], menu, open with "url"). Nothing about this goal\'s',
-    "own text. If nothing general was learned, answer NONE.",
+    `Write ONE line for the next task in "${app}": the way that failed and the way that worked, in English, at most`,
+    "30 words, naming only actions that were tried above. Nothing about actions not tried, nothing about this",
+    "goal's own text. If nothing general was learned, answer NONE.",
   ].join("\n");
 
 /** The tip in a model's answer: its first line, or undefined for NONE or an answer that is no line. */
