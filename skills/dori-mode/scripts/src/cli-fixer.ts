@@ -63,6 +63,11 @@ const openFixLane = (home: string): string | undefined =>
     .map((f) => readJson<{ key?: string; status?: string }>(join(home, "lanes", f)))
     .find((l) => l?.status === "working" || l?.status === "waiting")?.key;
 
+const laneKeys = (home: string): string[] =>
+  (existsSync(join(home, "lanes")) ? readdirSync(join(home, "lanes")) : [])
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => basename(f, ".json"));
+
 /** An open pull request among the numbers the issue's comments mention ("Fix in progress: #47648"). */
 const openPrIn = async (repo: string, numbers: readonly string[]): Promise<string | undefined> => {
   for (const n of numbers) {
@@ -85,6 +90,12 @@ const huntPick = async (c: ReturnType<typeof cfgOf>, tried: Record<string, strin
     const text = readFileSync(path, "utf8");
     const m = /github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)/.exec(text);
     if (!m?.[1] || !m[2]) continue;
+    // A hunt lane of any name had this issue before (hunt-49481, hunt-48810b): its answer stands.
+    const before = laneKeys(c.home).find((k) => new RegExp(`(^|-)${m[2]}(b|-|$)`).test(k));
+    if (before) {
+      console.log(`FIXER_SKIP ${key} lane ${before} had it`);
+      continue;
+    }
     const s = await run(["gh", "issue", "view", m[2], "-R", m[1], "--json", "state,comments"]);
     if (s.code !== 0) continue;
     const issue = JSON.parse(s.out) as { state?: string; comments?: { body?: string }[] };
