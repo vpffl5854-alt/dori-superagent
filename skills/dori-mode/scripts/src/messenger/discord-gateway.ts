@@ -37,6 +37,8 @@ export type Inbound = {
   readonly replyToText?: string;
   /** The message this one replies to, whole, so its text is readable past what the INBOUND line carries. */
   readonly replyTo?: MessageCreate;
+  /** Fetched by the backfill: posted while Dori was not listening, so the talk has moved on and it is not answered. */
+  readonly missed?: boolean;
 };
 
 export type MediaRef = {

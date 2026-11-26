@@ -19,23 +19,6 @@ export type Pending = {
   ownFrom?: number;
 };
 
-/**
- * A message older than this is not answered: after the gateway was down for hours, the backfill handed every missed
- * message to the lane at once and the room got answers to talk that had moved on (2026-11-26). It is still recorded.
- */
-export const STALE_MS = 15 * 60_000;
-const DISCORD_EPOCH = 1_420_070_400_000;
-/** Whether a Discord message id (a snowflake, which carries its own time) is older than STALE_MS. */
-export const isStale = (messageId: string, now = Date.now()): boolean =>
-  /^\d{17,20}$/.test(messageId) && now - (Number(BigInt(messageId) >> 22n) + DISCORD_EPOCH) > STALE_MS;
-
-/** True for a message too old to answer, after noting why it gets no answer. */
-export const tooOld = (stateDir: string, messageId: string): boolean => {
-  if (!isStale(messageId)) return false;
-  note(stateDir, `not answered: ${messageId} is older than ${STALE_MS / 60_000} min`);
-  return true;
-};
-
 export const pendingPath = (stateDir: string): string => join(stateDir, "discord-reply-pending.json");
 export const logPath = (stateDir: string): string => join(stateDir, "discord-replies.log");
 

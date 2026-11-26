@@ -79,9 +79,10 @@ export class DiscordInbound implements GatewayHost {
 
   /** The one path a message takes, whether it arrived on the socket or from a backfill page.
    * Returns true when the message reached the caller. */
-  report(data: unknown, guildHint?: string | null): boolean {
-    const inbound = toInbound(data, this.selfId, guildHint);
-    if (!inbound) return false;
+  report(data: unknown, guildHint?: string | null, missed = false): boolean {
+    const found = toInbound(data, this.selfId, guildHint);
+    if (!found) return false;
+    const inbound = missed ? { ...found, missed: true } : found;
     if (this.seen.has(inbound.messageId)) return false;
     this.seen.add(inbound.messageId);
     if (this.seen.size > MAX_SEEN) {
@@ -147,7 +148,7 @@ export class DiscordInbound implements GatewayHost {
       });
       for (const row of ordered) {
         cursor = newerId(cursor, idOf(row));
-        if (this.report(row, guild)) delivered++;
+        if (this.report(row, guild, true)) delivered++;
       }
       // The cursor means "everything up to here is handled", including the bot's own messages and
       // anything this run filtered, so the next restart does not fetch them again.

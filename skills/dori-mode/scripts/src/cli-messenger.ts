@@ -6,6 +6,7 @@ import type { DoriConfig } from "./config.ts";
 import { formatInbound } from "./messenger/discord-message.ts";
 import { DiscordInbound } from "./messenger/discord-inbound.ts";
 import { startDiscordReplies } from "./messenger/discord-answers.ts";
+import { missedTalk } from "./messenger/discord-missed.ts";
 import { sessionPathForPane } from "./messenger/discord-pane.ts";
 import {
   channelGuild,
@@ -179,6 +180,7 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
     // session log: the pane's working directory is what the log is filed under.
     () => sessionPathForPane(config),
   );
+  const missed = missedTalk((talk) => void replies.remember(talk));
   const inbound = new DiscordInbound(
     () => openGatewaySocket(),
     dcToken,
@@ -188,6 +190,8 @@ const discordInbound = async (config: DoriConfig): Promise<void> => {
       // The room is the lane's: the INBOUND line goes to the log file only, so the lead pane is not woken for every
       // room message it does not answer.
       logger.log(formatInbound(i) + routeTag(adaptDiscord(i).message, routerOptionsFromEnv(process.env)));
+      // What the room said while Dori was not listening is shown to the lane once, as the talk so far, not answered.
+      if (i.missed) return missed.add(i);
       // The lead answers the human, and a bot only when it called Dori; other bot posts are logged and left alone.
       if (i.authorIsBot) {
         void replies.enqueueBot(i);

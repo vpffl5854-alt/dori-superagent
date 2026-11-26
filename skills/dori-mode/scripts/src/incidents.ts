@@ -45,7 +45,7 @@ export const redact = (text: string): string =>
   text
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
     .replace(/((?:token|key|secret|password|cookie)["']?\s*[:=]\s*["']?)[^\s"',]+/gi, "$1[redacted]")
-    .replace(/\b[A-Za-z0-9_\-]{40,}\b/g, "[redacted]");
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[redacted]");
 
 export type Seen = { count: number; firstAt: string; lastAt: string; file: string; sample: string; issue?: string };
 export type IncidentState = { offsets: Record<string, number>; seen: Record<string, Seen> };

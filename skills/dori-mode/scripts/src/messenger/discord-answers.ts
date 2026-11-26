@@ -13,13 +13,15 @@
 import type { SessionRef } from "../../../../../src/runtime/types.ts";
 import type { DoriConfig } from "../config.ts";
 import { type ChosenRuntimes, run, runtimesOf } from "../run.ts";
-import { agentStatus, readScreen, sendVerified, statusLookup } from "../sessions.ts";
+import { statusLookup } from "../sessions.ts";
 import { botAnswerer } from "./discord-bot-replies.ts";
 import type { Discord } from "./discord.ts";
 import type { Inbound } from "./discord-gateway.ts";
 import { lastAnswer, postAnswer, sessionSize } from "./discord-reply.ts";
 import { resolveLeadRef, sessionPathFor } from "./discord-pane.ts";
-import { note, type Pending, pendingPath, readPending, tooOld, writePending } from "./discord-answers-state.ts";
+import { note, type Pending, pendingPath, readPending, writePending } from "./discord-answers-state.ts";
+import { type Batch, batches } from "./discord-answers-batch.ts";
+import { handOff, handOffMissed } from "./discord-handoff.ts";
 
 const POLL_MS = 1_500;
 const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -31,57 +33,6 @@ export type ReplyLoop = { readonly stop: () => void };
 const sleep = (ms: number): Promise<void> => Bun.sleep(ms);
 const clock = { now: () => Date.now(), sleep };
 
-/** True when the pane's input box already holds unsent text: typing then would append to it, not send. */
-const draftPresent = async (rts: ReturnType<typeof runtimesOf>, ref: SessionRef): Promise<boolean> => {
-  let screen: string;
-  try {
-    screen = await readScreen(rts, ref, 40);
-  } catch {
-    return true;
-  }
-  const lines = screen.split("\n").map((line) => line.replace(/\s+$/, ""));
-  const at = lines.findLastIndex((line) => line.trimStart().startsWith("❯"));
-  if (at < 0) return false;
-  const box = lines.slice(at + 1);
-  const end = box.findIndex((line) => /^[─━]{10,}/.test(line.trim()));
-  return box.slice(0, end < 0 ? box.length : end).some((line) => line.trim() !== "");
-};
-
-/**
- * Room text is typed into the pane, and the pane refuses a backtick or `$(` (typed into a bare shell they would run).
- * A message carrying either never reached the lane and was dropped without a word (11/23–11/25, mostly bot posts that
- * quote code). The lane only reads the text, so look-alikes keep it readable: ˋcodeˋ, $ (…).
- */
-export const forPane = (text: string): string => text.replace(/`/g, "ˋ").replace(/\$\(/g, "$ (");
-
-const handOff = async (
-  rts: ReturnType<typeof runtimesOf>,
-  ref: SessionRef,
-  sessionPath: string,
-  channel: string,
-  messageId: string,
-  author?: string,
-  text?: string,
-  signal?: { readonly mentions?: readonly string[]; readonly replyToAuthor?: string },
-): Promise<boolean> => {
-  const status = await agentStatus(rts, ref);
-  if (status === undefined || status === "shell" || status === "gone") return false;
-  if (await draftPresent(rts, ref)) return false;
-  const body = text?.trim() ? `\n본문: ${forPane(text.trim())}` : `\n원문은 위 세션기록에서 읽으세요: ${sessionPath}`;
-  // The lane answers differently depending on how the message reached it: a reply or a mention is a direct call to
-  // answer, plain room text is not. The distinction is carried here, not inferred from the text body, so a mention
-  // that names the bot by its display name still reads as a call.
-  const signalLine = signal?.replyToAuthor
-    ? `\n형식: 답장(${JSON.stringify(signal.replyToAuthor)}의 글에 대한 답장)`
-    : signal?.mentions?.length
-      ? `\n형식: 맨션(${signal.mentions.join(", ")}을 맨션)`
-      : "\n형식: 방 잡담(직접 호출 아님)";
-  const prompt =
-    `디코 수신 · 채널=${channel} msg=${messageId}${author === undefined ? "" : ` [수신 | ${forPane(author)}]`}${body}${forPane(signalLine)}\n` +
-    "이 메시지에 답하면 그 답이 디코로 올라갑니다. 답은 이 메시지에 대한 답 하나로만 쓰세요.";
-  return (await sendVerified(rts, clock, ref, prompt)) !== "failed";
-};
-
 export const startDiscordReplies = (
   discord: Discord,
   stateDir: string,
@@ -92,6 +43,8 @@ export const startDiscordReplies = (
 ): ReplyLoop & {
   readonly enqueue: (item: Omit<Pending, "offset">) => Promise<boolean>;
   readonly enqueueBot: (inbound: Inbound) => Promise<boolean>;
+  /** The talk the room had while the gateway was down: shown to the lane once, never answered (no pending entry). */
+  readonly remember: (missed: readonly Inbound[]) => Promise<boolean>;
 } => {
   const path = pendingPath(stateDir);
   // The named pane is looked up again whenever the reply loop needs it: a lane renamed or reopened gets a new address,
@@ -99,11 +52,8 @@ export const startDiscordReplies = (
   const target = async (): Promise<SessionRef | undefined> => await resolveLeadRef(config, rts).catch(() => undefined);
   let stopped = false;
   const posted = new Set<string>();
-  /** One answer goes to the room once: several messages handed over in one turn all read the turn's last answer. */
-  const postedText = new Map<string, string>();
 
   const enqueue = async (item: Omit<Pending, "offset">): Promise<boolean> => {
-    if (tooOld(stateDir, item.messageId)) return true;
     const ref = await target();
     if (!ref) return false;
     // Read before the hand-off: a working pane answers the next prompt in the turn it is already running, so the
@@ -174,7 +124,12 @@ export const startDiscordReplies = (
     },
   });
 
-  const answer = async (item: Pending): Promise<boolean> => {
+  /**
+   * One turn answers every message handed over while it ran: the batch waits for the turn to end, reads its last
+   * answer from where the earliest message's turn began, and posts it once, as a reply to the newest message. Each
+   * message read that same answer before, so a burst of four got it four times (2026-11-26).
+   */
+  const answer = async (b: Batch): Promise<boolean> => {
     const started = Date.now();
     let working = false;
     let idleReads = 0;
@@ -194,31 +149,28 @@ export const startDiscordReplies = (
         continue;
       }
       if (ref !== undefined && status !== undefined && ++idleReads < IDLE_READS) continue;
-      const text = lastAnswer(item.sessionPath, item.ownFrom ?? item.offset);
+      const text = lastAnswer(b.sessionPath, b.from);
       if (!text) {
         if (working) {
           // Dropped without a word before: the pane finished its turn but no answer was found where it was looked for.
-          note(stateDir, `no answer found for ${item.messageId} in ${item.sessionPath}`);
+          note(stateDir, `no answer found for ${b.replyTo} in ${b.sessionPath}`);
           return true;
         }
         continue;
       }
       // The same answer is never posted twice for one message: a retry after a failed post, or a second pass over the
       // same entry, would put the same words in the room again.
-      if (posted.has(item.messageId)) return true;
-      const twin = postedText.get(text.trim());
-      if (twin) {
-        posted.add(item.messageId);
-        note(stateDir, `same answer as for ${twin}: not posted again for ${item.messageId}`);
-        return true;
-      }
+      if (posted.has(b.replyTo)) return true;
+      const others = b.items.map((i) => i.messageId).filter((id) => id !== b.replyTo);
       try {
-        const ids = await postAnswer(discord, item.channel, item.messageId, text);
-        posted.add(item.messageId);
-        postedText.set(text.trim(), item.messageId);
-        note(stateDir, `posted ${ids.length} message(s) for ${item.messageId}`);
+        const ids = await postAnswer(discord, b.channel, b.replyTo, text);
+        for (const i of b.items) posted.add(i.messageId);
+        note(
+          stateDir,
+          `posted ${ids.length} message(s) for ${b.replyTo}${others.length ? ` (with ${others.join(", ")})` : ""}`,
+        );
       } catch (e) {
-        note(stateDir, `post failed for ${item.messageId}: ${(e as Error).message}`);
+        note(stateDir, `post failed for ${b.replyTo}: ${(e as Error).message}`);
       }
       return true;
     }
@@ -230,11 +182,13 @@ export const startDiscordReplies = (
       await sleep(pollMs);
       const pending = readPending(path);
       if (pending.length === 0) continue;
-      const keep: Pending[] = [];
-      for (const item of pending) {
-        if (!(await answer(item))) keep.push(item);
-      }
-      writePending(path, keep);
+      const done = new Set<string>();
+      for (const b of batches(pending)) if (await answer(b)) for (const i of b.items) done.add(i.messageId);
+      // Read again before writing: a message handed over while this pass waited is in the file, not in `pending`.
+      writePending(
+        path,
+        readPending(path).filter((p) => !done.has(p.messageId)),
+      );
     }
   };
 
@@ -244,6 +198,15 @@ export const startDiscordReplies = (
       stopped = true;
     },
     enqueue,
-    enqueueBot: async (inbound) => tooOld(stateDir, inbound.messageId) || (await answerBot(inbound)),
+    enqueueBot: answerBot,
+    remember: async (missed) => {
+      const ref = await target();
+      const ok = ref !== undefined && (await handOffMissed(rts, ref, missed));
+      note(
+        stateDir,
+        `missed talk (${missed.length} message(s)) ${ok ? "shown to" : "not handed to"} the lane, unanswered`,
+      );
+      return ok;
+    },
   };
 };

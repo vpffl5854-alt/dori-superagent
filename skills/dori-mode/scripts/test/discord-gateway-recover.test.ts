@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 
 import { HELLO_TIMEOUT_MS, type Clock, type GatewaySocket } from "../src/messenger/discord-gateway.ts";
 import { type GatewayState, GatewaySocketLoop } from "../src/messenger/discord-gateway-socket.ts";
-import { isStale } from "../src/messenger/discord-answers-state.ts";
 
 /** A clock whose timers run only when the test says so, and sockets the test can close. */
 const rig = () => {
@@ -85,12 +84,4 @@ test("a new socket that never says hello is replaced too; one that does keeps no
   r.sockets[1]?.hello();
   expect(r.timers.filter((t) => t.ms === HELLO_TIMEOUT_MS)).toHaveLength(0);
   r.loop.stop();
-});
-
-test("a message older than 15 minutes is stale; a short test id never is", () => {
-  const now = Date.parse("2026-11-26T13:48:20Z");
-  const id = (at: string) => String((BigInt(Date.parse(at) - 1_420_070_400_000) << 22n) | 1n);
-  expect(isStale(id("2026-11-26T04:52:00Z"), now)).toBe(true);
-  expect(isStale(id("2026-11-26T13:40:00Z"), now)).toBe(false);
-  expect(isStale("10", now)).toBe(false);
 });
