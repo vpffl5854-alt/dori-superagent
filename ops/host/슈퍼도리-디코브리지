@@ -11,6 +11,7 @@ set -u
 LOG="${SUPERDORI_INBOUND_LOG:-$HOME/.dori-superagent/logs/discord-inbound.log}"
 STATE="${SUPERDORI_BRIDGE_STATE:-$HOME/.dori-superagent/state/bridge-offset}"
 POLL="${SUPERDORI_BRIDGE_POLL:-2}"
+OWNER="${SUPERDORI_OWNER:-sseritwo_51107}"
 
 mkdir -p "$(dirname "$STATE")"
 [ -f "$STATE" ] || printf '0\n' > "$STATE"
@@ -41,10 +42,11 @@ while :; do
     chunk=$(tail -c +$((offset + 1)) "$LOG")
     printf '%s' "$size" > "$STATE"
     while IFS= read -r line; do
+      # 리드에는 지브가 '리드'를 넣어 시킨 글만 넣는다(decisions.md 2026-11-24). 나머지(봇 글, 잡담, '리드' 없는
+      # 지브 글)는 디코도리 판(discord-chat)이 맡는다. 예전엔 route=chat 만 뺐더니 리드에 넘어간 30건 중 28건이
+      # 봇 글이었다(2026-11-26 실측).
       case "$line" in
-        # 잡담(route=chat)은 디코도리 판(discord-chat)이 답한다. 리드에는 일거리만 넣는다 (2026-11-24 지브).
-        INBOUND\ *route=chat:*) ;;
-        INBOUND\ *) send_line "$line" ;;
+        INBOUND\ *"[수신 | $OWNER]"*리드*) send_line "$line" ;;
       esac
     done <<< "$chunk"
   fi
