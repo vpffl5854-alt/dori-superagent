@@ -101,7 +101,7 @@ test("with autoSend the task's own message goes out at once, by Return or by a �
     expect(r.ok).toBe(true);
     expect(held).toEqual([]);
     expect(sent).toHaveLength(1);
-    expect(r.history.some((h) => h.result === '보냈음: "테스트"')).toBe(true);
+    expect(r.history.some((h) => h.result === 'Enter·보내기 눌렀음 (칸에 있던 글: "테스트")')).toBe(true);
   }
 });
 

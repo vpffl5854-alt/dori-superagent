@@ -150,7 +150,14 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
     if (c.stopped()) return { ok: false, result: "", end: { text: '도리방 "멈춰"로 멈췄어요', held: false } };
     const r = await e.call("ax.perform", { ref: step, action: "AXPress" });
     return r.error
-      ? { ok: false, result: `"${step}" 못 눌렀어요: ${r.error.message}` }
+      ? {
+          ok: false,
+          result: `"${step}" 못 눌렀어요: ${
+            (r.error.data as { reason?: string } | undefined)?.reason === "occluded"
+              ? "다른 것에 가려졌다며 엔진이 안 눌렀어요. 같은 걸 다시 누르지 말고 앱의 검색·단축키로 가세요"
+              : r.error.message
+          }`,
+        }
       : { ok: true, result: "눌렀음" };
   }
   const window = c.shown && c.shown.app === findWindow(c.wins, act.app)?.app ? c.shown.title : undefined;
@@ -158,7 +165,7 @@ export const doAct = async (e: Engine, act: Exclude<Act, { do: "done" | "fail" }
   if (!r.ok && (r.note.includes("쓰는 중") || r.note.includes("멈춰")))
     return { ok: false, result: "", end: { text: r.note, held: false } };
   const shown = r.shown.length ? `, 보이는 값: ${r.shown.slice(0, 3).join(", ")}` : "";
-  if (r.ok && sendsNow) return { ok: true, result: `보냈음: "${sends}"` };
+  if (r.ok && sendsNow) return { ok: true, result: `Enter·보내기 눌렀음 (칸에 있던 글: "${sends}")` };
   return r.ok
     ? { ok: true, result: `${act.do === "press" ? "눌렀음" : "했음"}${shown}`, step }
     : { ok: false, result: r.note };

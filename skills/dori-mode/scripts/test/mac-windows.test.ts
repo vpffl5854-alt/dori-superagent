@@ -58,3 +58,9 @@ test("the question lists an app's windows when it has several, the shown one fir
   const p = prompt("g", ["텍스트 편집기"], "텍스트 편집기", "", "", [], [], ["무제", "무제 2"]);
   expect(p).toContain('Windows of "텍스트 편집기": "무제" (shown below), "무제 2"');
 });
+
+test("Discord's question carries how to reach a channel: the Quick Switcher, not the side list", () => {
+  const p = prompt("g", ["Discord"], "Discord", '- link "3인방 (채팅 채널)" [ref=e2]', "", [], []);
+  expect(p).toContain('key ["cmd","k"]');
+  expect(prompt("g", ["계산기"], "계산기", "", "", [], [])).not.toContain("Quick Switcher");
+});

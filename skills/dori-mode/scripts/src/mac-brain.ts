@@ -37,6 +37,20 @@ const SNAPSHOT_MAX = 16_000;
 const MENUS_MAX = 4_000;
 const ACTIONS = "open, look, press, type, menu, key, done, fail";
 
+/**
+ * What an app needs that its controls do not say. Discord (Chromium) answers the engine's "what is at this point" with
+ * its whole page for every list item but the selected one, so the engine refuses a press on a channel as covered; its
+ * Quick Switcher reaches any channel, server or DM by keyboard instead (tried 2026-11-26).
+ */
+export const APP_TIPS: Readonly<Record<string, string>> = {
+  discord:
+    'Discord: pressing a channel, server or DM in the side list is refused (covered). To open one: key ["cmd","k"], type its name into the "Quick Switcher" box, then key ["return"]. The window title shows the open channel ("#일반 | 냥쿠마 - Discord").',
+};
+const tipsFor = (app: string | undefined): string[] =>
+  Object.entries(APP_TIPS)
+    .filter(([k]) => app?.toLowerCase().includes(k))
+    .map(([, v]) => v);
+
 /** The owner asked for Sonnet in the request itself ("소넷으로 …"). */
 export const wantsSonnet = (goal: string): boolean => /소넷|sonnet/i.test(goal);
 
@@ -92,7 +106,9 @@ export const prompt = (
       ? [`Windows of "${app}": ${windowTitles.map((t, i) => `"${t}"${i === 0 ? " (shown below)" : ""}`).join(", ")}`]
       : []),
     app
-      ? `Controls of "${app}" (role "name" [ref] : value):\n${snapshot.slice(0, SNAPSHOT_MAX)}`
+      ? [...tipsFor(app), `Controls of "${app}" (role "name" [ref] : value):\n${snapshot.slice(0, SNAPSHOT_MAX)}`].join(
+          "\n",
+        )
       : "No app looked at yet.",
     ...(app && menus
       ? [`Menu bar of "${app}" (menu > item (shortcut), [x] = disabled):\n${menus.slice(0, MENUS_MAX)}`]

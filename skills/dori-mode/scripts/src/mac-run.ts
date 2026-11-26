@@ -104,7 +104,16 @@ export const runTask = async (e: Engine, t: MacTask, o: RunOpts): Promise<RunRes
         return done(false, `"${step}" 못 했어요: ${SEVERAL_WINDOWS_NOTE}`, [], w.id);
       }
       if (!heldForOwner(r) || waited >= o.maxWaits)
-        return done(false, `"${step}" 못 했어요: ${r.error.message}`, [], w.id);
+        return done(
+          false,
+          `"${step}" 못 했어요: ${
+            (r.error.data as { reason?: string } | undefined)?.reason === "occluded"
+              ? "다른 것에 가려졌다며 엔진이 안 눌렀어요. 같은 걸 다시 누르지 말고 앱의 검색·단축키로 가세요"
+              : r.error.message
+          }`,
+          [],
+          w.id,
+        );
       waited++;
       await o.sleep(o.waitMs);
     }
