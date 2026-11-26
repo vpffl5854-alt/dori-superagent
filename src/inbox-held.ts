@@ -90,3 +90,49 @@ export function releaseHeld(d: Deps, target: string, index: number, how: "ack" |
     release();
   }
 }
+
+/**
+ * `drop` throws away queued entries that must never be delivered: a message the operator knows is stale (a pane that
+ * read `working` for hours keeps them queued). Only entries with no attempt are dropped. A held one may already have
+ * reached the pane, so `ack` settles it; a typed one is in the session's input already. `all` drops every queued entry
+ * of the inbox and leaves the rest. Runs under the inbox lock, so a flush in progress cannot overwrite the change.
+ * Returns the session as refText and the number of entries dropped.
+ */
+export function dropQueued(d: Deps, target: string, index: number, all: boolean): { paneId: string; dropped: number } {
+  const named = resolveTarget(d, target);
+  const ref = d.store.forwardOf(named) ?? named;
+  const paneId = refText(ref);
+  const release = d.store.lockInbox(ref, d.now());
+  if (!release) throw new Refusal(`the inbox of ${paneId} is being flushed right now; try again`);
+  try {
+    d.store.mergeForwarded(ref);
+    const msgs = d.store.queued(ref);
+    if (all) {
+      const kept = msgs.filter((m) => m.attempt !== undefined);
+      if (kept.length === msgs.length)
+        throw new Refusal(`no queued entry in the inbox of ${paneId} can be dropped (see dori inbox list ${target})`);
+      d.store.saveInbox(ref, kept);
+      return { paneId, dropped: msgs.length - kept.length };
+    }
+    const m = Number.isInteger(index) ? msgs[index - 1] : undefined;
+    if (!m)
+      throw new Refusal(
+        `no entry ${index} in the inbox of ${paneId} (${msgs.length} entries; see dori inbox list ${target})`,
+      );
+    if (m.attempt?.state === "ambiguous")
+      throw new Refusal(
+        `entry ${index} of ${paneId} is held: it may already have reached the pane, so ack it if it did (dori inbox ack ${paneId} ${index}); drop is for queued entries only`,
+      );
+    if (m.attempt !== undefined)
+      throw new Refusal(
+        `entry ${index} of ${paneId} is already typed into the pane; only queued entries can be dropped`,
+      );
+    d.store.saveInbox(
+      ref,
+      msgs.filter((_, i) => i !== index - 1),
+    );
+    return { paneId, dropped: 1 };
+  } finally {
+    release();
+  }
+}

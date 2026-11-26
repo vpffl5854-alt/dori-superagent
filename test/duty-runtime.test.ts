@@ -3,7 +3,7 @@ import { dutyTick } from "../src/duty.ts";
 import type { SessionRef } from "../src/runtime/types.ts";
 import type { Lane } from "../src/store-types.ts";
 import { terminal } from "./fake-hc.ts";
-import { World } from "./fake.ts";
+import { World, href } from "./fake.ts";
 
 const REF: SessionRef = { runtime: "hc", id: "t1", group: "g" };
 const lane = (over: Partial<Lane> = {}): Lane => ({
@@ -30,6 +30,27 @@ describe("the duty pass on hc lanes", () => {
     w.clock = 60 * 60_000;
     expect(await dutyTick(d)).toEqual([]);
     expect(d.store.lane("hc-lane")!.nudges).toBe(0);
+    expect(w.hc.sent).toEqual([]);
+  });
+
+  test("an agent in error for ten minutes tells the lead once, and nothing is typed into it", async () => {
+    const w = new World();
+    const d = w.deps({ runtime: "hc" });
+    const lead = w.addPane("w1:p1", "idle");
+    d.store.setRole("lead", href("w1:p1"));
+    w.hc.terminals.set("t1", terminal({ status: { state: "error", app: "omo" } }));
+    d.store.saveLane(lane());
+    w.clock = 0;
+    expect(await dutyTick(d)).toEqual([]);
+    expect(lead.received).toEqual([]);
+    w.clock = 11 * 60_000;
+    expect(await dutyTick(d)).toContainEqual({ lane: "hc-lane", action: "stuck" });
+    expect(lead.received.filter((m) => m.includes("[STUCK hc-lane]"))).toEqual([
+      expect.stringContaining("has been error for 11 min and needs a person"),
+    ]);
+    w.clock = 60 * 60_000;
+    expect(await dutyTick(d)).toEqual([]);
+    expect(lead.received.filter((m) => m.includes("[STUCK hc-lane]"))).toHaveLength(1);
     expect(w.hc.sent).toEqual([]);
   });
 

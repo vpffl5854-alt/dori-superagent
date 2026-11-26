@@ -52,8 +52,12 @@ describe("hook config and placeholders", () => {
     expect(() => loadHooks(d.store.root)).toThrow("hooks.onReady");
     config(d, { hooks: { reviewCommand: ["rev", 7] } });
     expect(() => loadHooks(d.store.root)).toThrow("hooks.reviewCommand");
+    const head = "a".repeat(40);
+    w.gh = (argv) =>
+      argv[1] === "view" ? { code: 0, stdout: JSON.stringify({ headRefOid: head }) } : { code: 1, stdout: "" };
+    d.store.saveReceipt({ pr: "o/r#1", sha: head, verdict: "CLEAR", model: "m", at: 0, summary: "" });
     await expect(review(d, "o/r#1")).rejects.toThrow(ConfigError);
-    expect(w.calls.some((c) => c.cmd === "gh")).toBe(false);
+    expect(d.store.receipt("o/r#1", head)).toBeUndefined();
     config(d, { hooks: [] });
     expect(() => loadHooks(d.store.root)).toThrow("hooks must be an object");
   });
@@ -152,6 +156,8 @@ describe("reviewCommand and DORI_PROMPTS_DIR", () => {
     expect(d.store.receipt("o/r#5", head)).toMatchObject({ verdict: "CLEAR", model: "hook" });
     w.reviewer = () => ({ code: 0, stdout: "no verdict here" });
     await expect(review(d, "o/r#5")).rejects.toThrow("reviewer printed no VERDICT line");
+    w.reviewer = () => ({ code: 0, stdout: "VERDICT: CLEAR — 4 LOW findings" });
+    expect((await review(d, "o/r#6")).verdict).toBe("CLEAR");
   });
 
   test("DORI_PROMPTS_DIR overrides prompt() and the prompts dori up renders", async () => {

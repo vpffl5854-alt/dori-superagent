@@ -4,51 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Telemetry, telemetryEnabled } from "../src/telemetry.ts";
 import { VERSION } from "../src/telemetry-otlp.ts";
-
-type Sent = { url: string; body: string; headers: Record<string, string> };
-
-function rig(
-  env: Record<string, string> = {},
-  logsStatus: () => number = () => 200,
-  registerStatus: () => number = () => 200,
-  logsText: () => string = () => "",
-) {
-  const home = mkdtempSync(join(tmpdir(), "dori-tel-"));
-  const sent: Sent[] = [];
-  const notices: string[] = [];
-  let clock = Date.parse("2026-11-02T10:00:00Z");
-  let minted = 0;
-  const t = new Telemetry(
-    home,
-    env,
-    async (url, body, headers) => {
-      sent.push({ url, body, headers });
-      if (url.endsWith("/v1/register"))
-        return { status: registerStatus(), text: JSON.stringify({ key: `install-key-${++minted}` }) };
-      return { status: logsStatus(), text: logsText() };
-    },
-    () => clock,
-    (s) => notices.push(s),
-  );
-  const logs = () => sent.filter((s) => s.url.endsWith("/v1/logs"));
-  const registers = () => sent.filter((s) => s.url.endsWith("/v1/register"));
-  const names = () =>
-    logs().flatMap((s) =>
-      JSON.parse(s.body).resourceLogs[0].scopeLogs[0].logRecords.map((r: { eventName: string }) => r.eventName),
-    );
-  return {
-    home,
-    t,
-    sent,
-    logs,
-    registers,
-    notices,
-    names,
-    advance: (ms: number) => {
-      clock += ms;
-    },
-  };
-}
+import { rig } from "./telemetry-rig.ts";
 
 describe("telemetry", () => {
   test("DORI_TELEMETRY=0 and DO_NOT_TRACK=1 turn it off completely: nothing sent, nothing written", async () => {
@@ -137,26 +93,6 @@ describe("telemetry", () => {
     expect(attrs["dori.evidence_count"]).toEqual({ intValue: "2" });
     expect(attrs["dori.lane_minutes"]).toEqual({ intValue: "37" });
     expect(r.logs()[0]!.body).not.toContain(r.home);
-  });
-
-  test("duty ticks are summed and sent at most once an hour", async () => {
-    const r = rig();
-    const tick = { ticks: 1, flushed: 1, nudges: 0, escalations: 0, lost: 0 };
-    for (let i = 0; i < 60; i++) {
-      r.t.duty(tick);
-      await r.t.flush(5000);
-      r.advance(60_000);
-    }
-    expect(r.logs()).toEqual([]);
-    r.t.duty({ ...tick, nudges: 1 });
-    await r.t.flush(5000);
-    expect(r.names()).toEqual(["dori.duty_summary"]);
-    const attrs = JSON.parse(r.logs()[0]!.body).resourceLogs[0].scopeLogs[0].logRecords[0].attributes;
-    const get = (k: string) => attrs.find((a: { key: string }) => a.key === k).value.intValue;
-    expect([get("dori.ticks"), get("dori.flushed"), get("dori.nudges")]).toEqual(["61", "61", "1"]);
-    r.t.duty(tick);
-    await r.t.flush(5000);
-    expect(r.logs()).toHaveLength(1);
   });
 
   test("an unreachable collector or a refused registration never throws and sends no logs", async () => {

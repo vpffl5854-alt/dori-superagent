@@ -1,4 +1,12 @@
-export type RuntimeKind = "herdr" | "hc";
+/** Runtimes whose sessions are terminals: the only ones that may host the lead, duty or loops (`runtime`). */
+export type TerminalKind = "herdr" | "hc";
+/** `omo-host`: an agent session inside omo's shared engine host (one process per machine); only lanes open there. */
+export type RuntimeKind = TerminalKind | "omo-host";
+/**
+ * Runtimes whose sessions are agents, not shells: `create` opens the agent (with `CreateSpec.model`), `start` sends its
+ * first prompt instead of typing a shell command, and a session carries no env (the lane's env rides in its commands).
+ */
+export const AGENT_SESSION_KINDS: ReadonlySet<RuntimeKind> = new Set(["omo-host"]);
 /** One session as its runtime addresses it. `group`: the herdr workspace id or the hc dori.group label. `container`: the herdr tab id (absent on hc). */
 export type SessionRef = {
   readonly runtime: RuntimeKind;
@@ -20,6 +28,8 @@ export type Probe = {
   readonly cwd?: string;
   readonly shellInFront: boolean;
   readonly foreground?: readonly ForegroundProcess[];
+  /** The agent's goal status read from the agent itself (omo-host: `active`, `paused`, ..., `none`); undefined = read the screen. */
+  readonly goal?: string;
 };
 export type SessionInfo = {
   readonly ref: SessionRef;
@@ -43,6 +53,8 @@ export type CreateSpec = {
   readonly container: "workspace-root" | "tab" | "split-below";
   readonly group?: string;
   readonly near?: SessionRef;
+  /** The agent's model, for runtimes in AGENT_SESSION_KINDS; a terminal runtime gets it in the start command instead. */
+  readonly model?: string;
 };
 export type DeliverWhen = "idle" | "working" | "any";
 /** `when`: the status the text may be typed under (hc: --if idle / --if working / none for "any"; "any" still never types into an `unknown` or `shell` session). `force`: type into a blocked agent (hc --force; herdr: no-op). */
@@ -90,10 +102,12 @@ const BARE_HERDR = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/;
  * `t1b`, `t2h`). Another machine's `<machine>/<address>` is not a ref: the id names the session's inbox file.
  */
 const HC_ADDRESS = /^t[0-9a-z]+$/;
-const ID_SHAPES: Readonly<Record<RuntimeKind, RegExp>> = { herdr: BARE_HERDR, hc: HC_ADDRESS };
+/** An omo-host session is named by its durable session id (a UUID), never by the host's per-epoch `rpc-N` handle. */
+const DURABLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ID_SHAPES: Readonly<Record<RuntimeKind, RegExp>> = { herdr: BARE_HERDR, hc: HC_ADDRESS, "omo-host": DURABLE_ID };
 const KINDS = Object.keys(ID_SHAPES) as RuntimeKind[];
 
-/** "herdr:w1:p3", "hc:t7", bare "w1:p3" (herdr). A bare "t7" is NOT a ref (it is a legal lane key); undefined otherwise. */
+/** "herdr:w1:p3", "hc:t7", "omo-host:<uuid>", bare "w1:p3" (herdr). A bare "t7" is NOT a ref (it is a legal lane key); undefined otherwise. */
 export const parseRef: (text: string) => SessionRef | undefined = (text) => {
   for (const runtime of KINDS) {
     if (!text.startsWith(`${runtime}:`)) continue;

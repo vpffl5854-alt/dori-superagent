@@ -36,6 +36,23 @@ describe("lanes", () => {
     expect(d.store.roles().lead).toEqual(href("w1:p1"));
   });
 
+  test("start refuses a brief file or a --cwd directory that is not there, before it writes or opens anything", async () => {
+    const { w, d, lead, brief } = setup();
+    await expect(startLane(d, "no-brief", `${brief}.missing`, { group: "w1" })).rejects.toThrow(
+      `no brief file ${brief}.missing`,
+    );
+    await expect(startLane(d, "no-cwd", brief, { group: "w1", cwd: `${brief}.dir` })).rejects.toThrow(
+      `no directory ${brief}.dir`,
+    );
+    await expect(startLane(d, "file-cwd", brief, { group: "w1", cwd: brief })).rejects.toThrow(`no directory ${brief}`);
+    for (const key of ["no-brief", "no-cwd", "file-cwd"]) {
+      expect(d.store.lane(key)).toBeUndefined();
+      expect(existsSync(d.store.briefPath(key))).toBe(false);
+    }
+    expect(w.calls).toEqual([]);
+    expect(lead.received).toEqual([]);
+  });
+
   test("ready requires evidence, then reaches the lead; done closes only a ready lane", async () => {
     const { w, d, lead, brief } = setup();
     const lane = await startLane(d, "fix-login", brief, { group: "w1" });
@@ -48,6 +65,16 @@ describe("lanes", () => {
     await done(d, "fix-login");
     expect(w.panes.has(lane.paneId)).toBe(false);
     expect(d.store.lane("fix-login")!.status).toBe("done");
+  });
+
+  test("ready refuses a blank --evidence (an unset $PR_URL), alone or beside a real link; the lane stays working", async () => {
+    const { d, lead, brief } = setup();
+    await startLane(d, "fix-login", brief, { group: "w1" });
+    lead.received.length = 0;
+    for (const evidence of [[""], ["  "], ["https://github.com/o/r/pull/1", ""]])
+      await expect(ready(d, "fix-login", "fixed", evidence)).rejects.toThrow("--evidence is empty");
+    expect(d.store.lane("fix-login")!.status).toBe("working");
+    expect(lead.received).toEqual([]);
   });
 });
 

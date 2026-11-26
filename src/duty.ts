@@ -9,6 +9,12 @@ import { tripWatchdog, watchdogFinding } from "./watchdog.ts";
 
 export const NUDGE_MINUTES = [10, 20, 40] as const;
 
+/**
+ * How long a pane may sit in `blocked` or `error` before the duty loop tells the lead. The first nudge is the duty
+ * loop's first reaction to an idle lane, so the same ten minutes is its first reaction to a stall nobody is watching.
+ */
+const STUCK_MINUTES = NUDGE_MINUTES[0];
+
 export type DutyEvent = { lane?: string; pane?: string; action: string; detail?: string };
 
 /** An open lane the duty loop watches; a lane being migrated is left alone (no nudge, no lost, no activity stamp). */
@@ -70,12 +76,40 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
         events.push({ lane: lane.key, action: "lost" });
         continue;
       }
+      // Any status but blocked/error ends the stall, so a later one is reported again.
+      const endsStall = st !== "blocked" && st !== "error" && lane.blockedSince !== undefined;
+      if (endsStall) {
+        delete lane.blockedSince;
+        delete lane.blockedAlerted;
+      }
       if (st === "working") {
         lane.lastActivityAt = now;
         d.store.saveLane(lane);
         continue;
       }
-      if (lane.status === "waiting" || st === "blocked" || st === "error") continue;
+      if (endsStall) d.store.saveLane(lane);
+      if (st === "blocked" || st === "error") {
+        // A pane resting in blocked/error wants a person. Nothing is typed into it, so nothing would ever move it;
+        // the lead hears about it once per stall, after STUCK_MINUTES, and never for a lane that already said WAITING.
+        if (lane.status === "waiting") continue;
+        if (lane.blockedSince === undefined) {
+          lane.blockedSince = now;
+          d.store.saveLane(lane);
+        }
+        const stalledMin = Math.floor((now - lane.blockedSince) / 60_000);
+        if (lane.blockedAlerted === true || stalledMin < STUCK_MINUTES) continue;
+        lane.blockedAlerted = true;
+        lane.log.push({ at: now, kind: "stuck", text: `${st} for ${stalledMin} min` });
+        d.store.saveLane(lane);
+        await tellLead(
+          d,
+          `[STUCK ${lane.key}] ${refText(lane.sessionRef)} has been ${st} for ${stalledMin} min and needs a person`,
+          "duty",
+        );
+        events.push({ lane: lane.key, action: "stuck" });
+        continue;
+      }
+      if (lane.status === "waiting") continue;
       // A chat lane answers each message and then sits idle by design: silence is its normal state, not a stall. Its
       // brief forbids the READY this escalation waits for, so nudging it asks for a report it must not send and
       // escalates forever. `chatLanes` already means "stays open for conversation" (harness.ts), so honour it here.
@@ -115,6 +149,7 @@ export async function dutyTick(d: Deps): Promise<DutyEvent[]> {
     nudges: count((a) => a.startsWith("nudge-")),
     escalations: count((a) => a === "escalated"),
     lost: count((a) => a === "lost"),
+    stuck: count((a) => a === "stuck"),
   });
   return events;
 }

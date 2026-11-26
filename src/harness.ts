@@ -5,6 +5,7 @@ import { shq } from "./delivery.ts";
 import { memFreePct } from "./host.ts";
 import { type Exec, spawnExec } from "./runtime/exec.ts";
 import { HcRuntime } from "./runtime/hc/index.ts";
+import { OmoHostRuntime } from "./runtime/omo-host/index.ts";
 import { HerdrRuntime } from "./runtime/herdr/index.ts";
 import { Runtimes } from "./runtime/registry.ts";
 import { type RuntimeChoice, readRuntimeChoice } from "./runtime/select.ts";
@@ -48,7 +49,12 @@ export const defaultDeps = (): Deps => {
       // The choice is made only when a NEW session is opened: a stored session's own runtime needs none.
       runtimes ??= new Runtimes(
         () => choice().kind,
-        (k) => (k === "hc" ? new HcRuntime(spawnExec) : new HerdrRuntime(spawnExec, process.env["DORI_HERDR_SESSION"])),
+        (k) =>
+          k === "hc"
+            ? new HcRuntime(spawnExec)
+            : k === "omo-host"
+              ? new OmoHostRuntime(spawnExec)
+              : new HerdrRuntime(spawnExec, process.env["DORI_HERDR_SESSION"]),
       );
       return runtimes;
     },

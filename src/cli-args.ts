@@ -14,6 +14,8 @@ export const USAGE = `dori - a proactive multi-session harness on herdr or hc + 
   dori inbox list <pane|role|key>             queued entries: index, state (queued|typed|held), sender, time, first 60 chars
   dori inbox ack <pane|role|key> <index>      drop a held entry: it did reach the pane
   dori inbox resend <pane|role|key> <index>   release a held entry: the next flush delivers it
+  dori inbox drop <pane|role|key> <index>     throw away a queued entry: it never reached the pane and never will
+                  [--all]                     throw away every queued entry of the inbox; held and typed entries stay
   dori duty [--once] [--interval SECONDS]     flush inboxes, nudge idle lanes, escalate, detect lost lanes;
                                               close lanes past 1.5x their budget or looping on one scratch file
   dori duty stop [--text WHY] | resume | status   kill switch
@@ -27,7 +29,8 @@ export const USAGE = `dori - a proactive multi-session harness on herdr or hc + 
   dori backlog list | decide <id> --text ANSWER | drop <id> [--text WHY]
   dori backlog import <owner/repo> [--label dori] [--cwd DIR]   open labelled issues -> items
   dori review <owner/repo#N> [--model M]      fresh omo reviewer at the exact head -> receipt
-  dori merge <owner/repo#N> [--dry-run]       CLEAR receipt at head + green checks -> squash merge
+  dori merge <owner/repo#N> [--dry-run]       CLEAR receipt at head + green checks and pull_request workflows
+                                              (refused while workflow status cannot be verified)
   dori done <key>                             lead closes a READY lane
   dori migrate [--to hc|herdr] (--lane K | --role lead|duty|duty-loop|hourly-loop | --all) [--dry-run]
                [--wait-minutes N] [--resume]  hand sessions over to another runtime; MIGRATED, SKIP, DEFERRED,
@@ -54,9 +57,12 @@ export function parse(argv: readonly string[]): Args {
       pos.push(a);
       continue;
     }
-    const name = a.slice(2);
+    // --interval=60 is --interval 60; read whole, it would be a flag nobody reads that swallows the next argument.
+    const eq = a.indexOf("=");
+    const name = eq < 0 ? a.slice(2) : a.slice(2, eq);
+    if (eq >= 0 && BOOLEAN_FLAGS.has(name)) throw new Refusal(`--${name} takes no value`);
     // A value flag at the very end (--text $MSG with MSG unset) has no value; reading it as "true" would send that word.
-    const value = BOOLEAN_FLAGS.has(name) ? "true" : argv[++i];
+    const value = eq >= 0 ? a.slice(eq + 1) : BOOLEAN_FLAGS.has(name) ? "true" : argv[++i];
     if (value === undefined) throw new Refusal(`--${name} needs a value`);
     flags.set(name, [...(flags.get(name) ?? []), value]);
   }

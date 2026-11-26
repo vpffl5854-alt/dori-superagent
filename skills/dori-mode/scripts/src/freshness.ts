@@ -4,7 +4,7 @@ import { fill } from "./config.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { checkPausedLane } from "./pause.ts";
 import { runtimesOf } from "./run.ts";
-import { readScreen, sendVerified } from "./sessions.ts";
+import { closedMeanwhile, readScreen, sendVerified } from "./sessions.ts";
 import { type Lane, sessionOf, statusOf } from "./registry.ts";
 import { type Progress, ReportError, reportLine, Reports } from "./reports.ts";
 import { Supervision, type SupervisionResult } from "./supervision.ts";
@@ -99,7 +99,20 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
   const now = deps.clock.now();
   const reports = new Reports(deps.config.stateDir);
   const supervision = new Supervision({ ...deps, stateDir: deps.config.stateDir, reports }, deps.config.supervision);
-  for (const lane of await deps.registry.open()) {
+  for (const listed of await deps.registry.open()) {
+    // The open list is a snapshot: a lane closed since is skipped, and one closed while it is swept is closed again.
+    const lane = await deps.registry.read(listed.key);
+    if (lane === null || statusOf(lane) === "closed") continue;
+    try {
+      await sweepLane(lane);
+    } finally {
+      const swept = sessionOf(lane);
+      if (swept) await closedMeanwhile(deps, runtimesOf(deps), swept, lane.key);
+    }
+  }
+  return acts;
+
+  async function sweepLane(lane: Lane): Promise<void> {
     if (statusOf(lane) === "paused") {
       const checked = await checkPausedLane(deps, lane);
       if (checked && checked.lane.lastFreshnessNote !== "working-while-paused") {
@@ -111,10 +124,10 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
           detail: "paused lane is working on two ticks; left paused (resume is dori resume only)",
         });
       }
-      continue;
+      return;
     }
     const ref = sessionOf(lane);
-    if (statusOf(lane) !== "working" || !ref) continue;
+    if (statusOf(lane) !== "working" || !ref) return;
     // Only launched lanes report through the journal; an adopted lane keeps the screen path even if a record exists.
     let previous: Progress | null = null;
     let progress: Progress | null = null;
@@ -125,6 +138,9 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       try {
         previous = reports.read(lane.key);
         const screen = await readScreen(runtimesOf(deps), ref);
+        const lastQuestion = ref.runtime === "omo-host" ? reports.question(lane, screen, now) : lane.lastQuestion;
+        if (lastQuestion !== lane.lastQuestion) latest = { ...lane, lastQuestion };
+        if (latest !== lane) await deps.registry.write(latest);
         let supervised: SupervisionResult | null = null;
         try {
           // A launched lane is supervised once its journal exists; without one there is no progress to judge.
@@ -134,12 +150,12 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
           const detail = error instanceof Error ? error.message : String(error);
           if (detail !== lane.lastSupervisionError) {
             acts.push({ kind: "supervision-error", lane: lane.key, detail });
-            latest = { ...lane, lastSupervisionError: detail };
+            latest = { ...latest, lastSupervisionError: detail };
             await deps.registry.write(latest);
           }
         }
         if (supervised && lane.lastSupervisionError) {
-          latest = { ...lane, lastSupervisionError: undefined };
+          latest = { ...latest, lastSupervisionError: undefined };
           await deps.registry.write(latest);
         }
         for (const detail of supervised?.alerts ?? []) {
@@ -160,13 +176,13 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
           acts.push({ kind: "journal-error", lane: lane.key, detail: error.message });
           await deps.registry.write({ ...lane, lastFreshnessNote: note });
         }
-        continue;
+        return;
       }
     }
     if (progress?.state === "stalled" && previous?.state !== "stalled" && !supervisedHung) {
       acts.push({ kind: "stalled", lane: lane.key, detail: progress.lastEvent.text });
     }
-    if (progress?.state === "stalled") continue;
+    if (progress?.state === "stalled") return;
     // A blocker, question, halted or done lane is not nudged, but its report still reaches the thread.
     const running = !progress || progress.state === "running";
     const heard = Math.max(lastHeard(lane), progress?.lastReport ? Date.parse(progress.lastReport.at) : 0);
@@ -218,7 +234,7 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
         const note = `${hold.kind}|${hold.detail}|${report ?? ""}`;
         if (note !== current.lastFreshnessNote) acts.push({ kind: hold.kind, lane: lane.key, detail: hold.detail });
         await deps.registry.write({ ...current, lastFreshnessNote: note });
-        continue;
+        return;
       }
       const text = `Progress (from the lane's last report): ${scrubForThread(report ?? "", home)}`;
       await deps.run(fill(hook, { thread: lane.thread, text, key: lane.key }));
@@ -231,5 +247,4 @@ export const freshnessTick = async (deps: FlowDeps, home: string): Promise<Sweep
       acts.push({ kind: "posted", lane: lane.key, detail: text });
     }
   }
-  return acts;
 };

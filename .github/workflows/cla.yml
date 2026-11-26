@@ -1,39 +1,73 @@
 name: CLA Assistant
 
+# Runs only from the default branch: workflow_run after "CLA Request" (cla-request.yml) finished for a pull request,
+# and issue_comment for the signing sentence or "recheck". It never checks out, downloads or runs anything from a pull
+# request; every decision is made from GitHub API data. Do not add pull_request or pull_request_target here.
 on:
   issue_comment:
     types: [created]
-  pull_request_target:
-    types: [opened, synchronize]
+  workflow_run:
+    workflows: ["CLA Request"]
+    types: [completed]
 
 permissions:
-  actions: write
+  actions: read
   contents: write
   pull-requests: write
   statuses: write
 
+env:
+  CLA_ALLOWLIST: code-yeongyu,YeongYU,bot*,dependabot*,github-actions*,*[bot],sisyphus-dev-ai,web-flow
+  CLA_SIGN_COMMENT: "I have read the CLA Document and I hereby sign the CLA"
+  CLA_NOT_SIGNED_COMMENT: |
+    Thank you for your contribution! Before we can merge this PR, we need you to sign our [Contributor License Agreement (CLA)](https://github.com/sisyphuslabs/dori-superagent/blob/main/CLA.md).
+
+    **To sign the CLA**, please comment on this PR with:
+    ```
+    I have read the CLA Document and I hereby sign the CLA
+    ```
+
+    This is a one-time requirement. Once signed, all your future contributions will be automatically accepted. Signing also lets the project keep its [licence](https://github.com/sisyphuslabs/dori-superagent/blob/main/LICENSE) consistent for every contribution.
+  CLA_ALL_SIGNED_COMMENT: |
+    All contributors have signed the CLA. Thank you! ✅
+
 jobs:
   cla:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        (github.event.comment.body == 'recheck' ||
+          github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
     runs-on: ubuntu-latest
     steps:
+      # The action reads the pull request number from the event payload, so it can only run on issue_comment. It records
+      # a new signature and keeps the sign request comment current; the step below reports the result on the pull request.
+      - name: CLA Assistant
+        if: github.event_name == 'issue_comment'
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: "signatures/cla.json"
+          path-to-document: "https://github.com/sisyphuslabs/dori-superagent/blob/main/CLA.md"
+          branch: "cla-signatures"
+          allowlist: ${{ env.CLA_ALLOWLIST }}
+          custom-notsigned-prcomment: ${{ env.CLA_NOT_SIGNED_COMMENT }}
+          custom-pr-sign-comment: ${{ env.CLA_SIGN_COMMENT }}
+          custom-allsigned-prcomment: ${{ env.CLA_ALL_SIGNED_COMMENT }}
+          lock-pullrequest-aftermerge: false
+
       - name: Check stored CLA signatures
-        id: cla_state
-        if: github.event_name == 'pull_request_target'
+        if: ${{ !cancelled() }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const signaturePath = "signatures/cla.json";
             const signatureBranch = "cla-signatures";
-            const allowlist = [
-              "code-yeongyu",
-              "YeongYU",
-              "bot*",
-              "dependabot*",
-              "github-actions*",
-              "*[bot]",
-              "sisyphus-dev-ai",
-              "web-flow",
-            ];
+            const statusContext = "cla";
+            // The action finds its own comment by this text, so a sign request posted here is the one it later edits.
+            const botMarker = "CLA Assistant Lite bot";
+            const allowlist = process.env.CLA_ALLOWLIST.split(",").map((entry) => entry.trim());
 
             const matchesAllowlist = (login) => {
               const normalizedLogin = login.toLowerCase();
@@ -54,7 +88,33 @@ jobs:
             };
 
             const { owner, repo } = context.repo;
-            const pullNumber = context.payload.pull_request.number;
+
+            // workflow_run carries no pull request for a fork, and nothing the fork's run produced is trusted. The
+            // pull request is the open one whose head is exactly the commit and repository GitHub recorded for the run.
+            let pull;
+            if (context.eventName === "workflow_run") {
+              const run = context.payload.workflow_run;
+              const headOwner = run.head_repository?.owner?.login;
+              const candidates = headOwner
+                ? await github.paginate(github.rest.pulls.list, {
+                    owner,
+                    repo,
+                    state: "open",
+                    head: `${headOwner}:${run.head_branch}`,
+                    per_page: 100,
+                  })
+                : [];
+              pull = candidates.find(
+                (candidate) =>
+                  candidate.head.sha === run.head_sha && candidate.head.repo?.id === run.head_repository.id,
+              );
+              if (!pull) {
+                core.notice(`No open pull request has head ${run.head_sha}; a newer push or a close replaced this request.`);
+                return;
+              }
+            } else {
+              pull = (await github.rest.pulls.get({ owner, repo, pull_number: context.payload.issue.number })).data;
+            }
 
             const [signatureFile, commits] = await Promise.all([
               github.rest.repos.getContent({
@@ -66,7 +126,7 @@ jobs:
               github.paginate(github.rest.pulls.listCommits, {
                 owner,
                 repo,
-                pull_number: pullNumber,
+                pull_number: pull.number,
                 per_page: 100,
               }),
             ]);
@@ -95,9 +155,8 @@ jobs:
                 .filter(Boolean),
             );
             const contributors = new Map();
-            // A commit whose author email is not linked to a GitHub account has no author object here. The action
-            // evaluates such a commit by its raw author name and blocks until it is signed, so it must reach the
-            // action instead of being dropped from this pre-check.
+            // A commit whose author email is not linked to a GitHub account has no author object here. Nobody can sign
+            // for it, so it blocks until the author links the email; it must never be dropped from this check.
             let unlinked = 0;
 
             for (const commit of commits) {
@@ -120,49 +179,75 @@ jobs:
                 !signedNames.has(login)
               );
             });
-
-            core.setOutput("needs_cla_action", unsigned.length > 0 || unlinked > 0 ? "true" : "false");
+            const allSigned = unsigned.length === 0 && unlinked === 0;
 
             if (unlinked > 0) {
-              core.info(`${unlinked} commit(s) have no linked GitHub author; handing them to CLA Assistant.`);
+              core.info(`${unlinked} commit(s) have no linked GitHub author.`);
             }
             if (unsigned.length > 0) {
               core.info(
-                `CLA Assistant needed for unsigned contributors: ${unsigned
-                  .map((contributor) => contributor.login)
-                  .join(", ")}`,
+                `CLA signature needed from: ${unsigned.map((contributor) => contributor.login).join(", ")}`,
               );
             } else if (unlinked === 0) {
               core.info("All linked commit authors already signed the CLA or are allowlisted.");
             }
 
-      - name: CLA Assistant
-        if: >-
-          (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-            (github.event.comment.body == 'recheck' ||
-              github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')) ||
-          steps.cla_state.outputs.needs_cla_action == 'true'
-        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          path-to-signatures: "signatures/cla.json"
-          path-to-document: "https://github.com/sisyphuslabs/dori-superagent/blob/main/CLA.md"
-          branch: "cla-signatures"
-          allowlist: code-yeongyu,YeongYU,bot*,dependabot*,github-actions*,*[bot],sisyphus-dev-ai,web-flow
-          custom-notsigned-prcomment: |
-            Thank you for your contribution! Before we can merge this PR, we need you to sign our [Contributor License Agreement (CLA)](https://github.com/sisyphuslabs/dori-superagent/blob/main/CLA.md).
+            // The run itself belongs to the default branch, so the pull request sees the result as a commit status.
+            await github.rest.repos.createCommitStatus({
+              owner,
+              repo,
+              sha: pull.head.sha,
+              context: statusContext,
+              state: allSigned ? "success" : "failure",
+              description: allSigned
+                ? "All contributors have signed the CLA."
+                : "A CLA signature is missing. See the comment on this pull request.",
+              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            });
 
-            **To sign the CLA**, please comment on this PR with:
-            ```
-            I have read the CLA Document and I hereby sign the CLA
-            ```
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pull.number,
+              per_page: 100,
+            });
+            const botComment = comments.find(
+              (comment) => comment.user?.login === "github-actions[bot]" && comment.body?.includes(botMarker),
+            );
+            const allSignedBody = `${process.env.CLA_ALL_SIGNED_COMMENT.trim()}<br/><sub>Posted by the **${botMarker}**.</sub>`;
+            // Author names of unlinked commits are free text from the fork, so the comment gives only their count.
+            const unlinkedNote =
+              unlinked > 0
+                ? `**${unlinked}** commit(s) use an author email that is not linked to a GitHub account. Please [add that email to your account](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/troubleshooting-commits/why-are-my-commits-linked-to-the-wrong-user#commits-are-not-linked-to-any-user) so the CLA can be signed.<br/>`
+                : "";
+            const notSignedBody = [
+              process.env.CLA_NOT_SIGNED_COMMENT.trim(),
+              "",
+              "- - -",
+              process.env.CLA_SIGN_COMMENT,
+              "- - -",
+              "",
+              `${unlinkedNote}<sub>You can retrigger this bot by commenting **recheck** in this Pull Request. </sub><sub>Posted by the **${botMarker}**.</sub>`,
+            ].join("\n");
 
-            This is a one-time requirement. Once signed, all your future contributions will be automatically accepted. Signing also lets the project keep its [licence](https://github.com/sisyphuslabs/dori-superagent/blob/main/LICENSE) consistent for every contribution.
-          custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
-          custom-allsigned-prcomment: |
-            All contributors have signed the CLA. Thank you! ✅
-          lock-pullrequest-aftermerge: false
+            if (!botComment) {
+              if (!allSigned) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: pull.number, body: notSignedBody });
+              }
+              return;
+            }
+
+            // An existing sign request stays as the action last wrote it; only a comment that states the opposite of
+            // the current result is replaced.
+            const saysAllSigned = botComment.body.includes(process.env.CLA_ALL_SIGNED_COMMENT.trim());
+            if (allSigned !== saysAllSigned) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: botComment.id,
+                body: allSigned ? allSignedBody : notSignedBody,
+              });
+            }
 
       - name: Write job summary
         if: always()
@@ -178,8 +263,8 @@ jobs:
             echo
             echo "### What this job checks"
             echo
-            echo "- Checks stored CLA signatures for pull requests."
-            echo "- Runs the Contributor Assistant only when a signature action is needed."
+            echo "- Checks stored CLA signatures for the pull request and reports them as the \`cla\` commit status."
+            echo "- Posts the sign request when a signature is missing, and records a signature from a signing comment."
             echo
             echo "### If this fails"
             echo

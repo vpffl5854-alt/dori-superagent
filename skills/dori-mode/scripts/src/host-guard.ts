@@ -15,17 +15,22 @@ const num = (s: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-export const sampleHost = async (
-  run: Runner,
-  dataPath = "/",
-  rts: ChosenRuntimes = runtimesFor({}, process.env, run),
-): Promise<HostSample> => {
+/** Load, then free memory as the last read: what heavy admission decides on, with nothing slow after the memory read. */
+export type LoadMemory = Pick<HostSample, "load1" | "memFreePct"> & {
+  /** False when the value above is the guard's quiet fallback (0 load, 100% free) rather than a reading. */
+  readonly loadKnown: boolean;
+  readonly memKnown: boolean;
+};
+
+export const sampleLoadMemory = async (run: Runner): Promise<LoadMemory> => {
   const load = await run(["sysctl", "-n", "vm.loadavg"]);
   const loadLinux = load.code === 0 ? null : await run(["cat", "/proc/loadavg"]);
-  const load1 = num(
-    (load.code === 0 ? load.out.replace(/[{}]/g, "").trim() : (loadLinux?.out ?? "")).split(/\s+/)[0],
-    0,
-  );
+  const loadText =
+    (load.code === 0 ? load.out.replace(/[{}]/g, "").trim() : (loadLinux?.out ?? "")).split(/\s+/)[0] ?? "";
+  // Only digits are a reading: an empty or garbled output is unknown, not a load of 0.
+  const loadRead = /^\d+(\.\d+)?$/.test(loadText) ? Number(loadText) : Number.NaN;
+  const loadKnown = (load.code === 0 || loadLinux?.code === 0) && Number.isFinite(loadRead);
+  const load1 = loadKnown ? loadRead : 0;
   const mp = await run(["memory_pressure", "-Q"]);
   const memInfo = mp.code === 0 ? null : await run(["cat", "/proc/meminfo"]);
   const kb = (key: string): number | null => {
@@ -34,12 +39,23 @@ export const sampleHost = async (
   };
   const total = kb("MemTotal"),
     available = kb("MemAvailable");
-  const memFreePct =
+  const pressure = mp.code === 0 ? /free percentage: (\d+)%/.exec(mp.out)?.[1] : undefined;
+  const memRead =
     mp.code === 0
-      ? num(/free percentage: (\d+)%/.exec(mp.out)?.[1], 100)
+      ? Number(pressure)
       : total !== null && total > 0 && available !== null
-        ? Math.round((available / total) * 100)
-        : 100;
+        ? (available / total) * 100
+        : Number.NaN;
+  const memKnown = Number.isFinite(memRead);
+  return { load1, memFreePct: memKnown ? memRead : 100, loadKnown, memKnown };
+};
+
+export const sampleHost = async (
+  run: Runner,
+  dataPath = "/",
+  rts: ChosenRuntimes = runtimesFor({}, process.env, run),
+): Promise<HostSample> => {
+  const { load1, memFreePct } = await sampleLoadMemory(run);
   const df = await run(["df", "-k", dataPath]);
   const diskFreeGb = num(df.out.split("\n").at(-1)?.trim().split(/\s+/)[3], 0) / 1_048_576;
   const swap = await run(["sysctl", "-n", "vm.swapusage"]);
@@ -55,7 +71,7 @@ export const sampleHost = async (
 export const alertReasons = (s: HostSample, t: GuardThresholds): string[] => {
   const r: string[] = [];
   if (s.load1 > t.loadAlert) r.push(`load ${s.load1.toFixed(0)} > ${t.loadAlert}`);
-  if (s.memFreePct < t.memFreeMinPct) r.push(`memory free ${s.memFreePct}% < ${t.memFreeMinPct}%`);
+  if (s.memFreePct < t.memFreeMinPct) r.push(`memory free ${+s.memFreePct.toFixed(1)}% < ${t.memFreeMinPct}%`);
   if (s.diskFreeGb < t.diskFreeMinGb) r.push(`disk free ${s.diskFreeGb.toFixed(0)} GB < ${t.diskFreeMinGb} GB`);
   if (t.panesMax > 0 && s.panes < 0) r.push("session count unknown");
   if (t.panesMax > 0 && s.panes > t.panesMax) r.push(`panes ${s.panes} > ${t.panesMax}`);
@@ -72,7 +88,7 @@ export const guardTick = (s: HostSample, t: GuardThresholds, state: GuardState):
     out.push(
       alerting
         ? `HOST_GUARD ALERT ${reasons.join(" | ")}`
-        : `HOST_GUARD CLEAR load ${s.load1.toFixed(0)}, memory free ${s.memFreePct}%, disk free ${s.diskFreeGb.toFixed(0)} GB, swap free ${s.swapFreeGb.toFixed(1)} GB`,
+        : `HOST_GUARD CLEAR load ${s.load1.toFixed(0)}, memory free ${+s.memFreePct.toFixed(1)}%, disk free ${s.diskFreeGb.toFixed(0)} GB, swap free ${s.swapFreeGb.toFixed(1)} GB`,
     );
     state.alerting = alerting;
   }

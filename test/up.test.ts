@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { main } from "../src/cli.ts";
 import { up } from "../src/cli-up.ts";
 import { groupId } from "../src/runtime/group.ts";
 import { World } from "./fake.ts";
@@ -93,5 +94,16 @@ describe("dori up", () => {
       "hourly-loop": "hc:t4",
     });
     expect(out).toStartWith("UP runtime=hc lead=hc:t1 duty=hc:t2 loop=hc:t3 hourly=hc:t4 ");
+  });
+
+  test("a --cwd that is not a directory is refused before any session opens or role is set", async () => {
+    const w = new World();
+    const d = w.deps();
+    for (const cwd of [join(d.store.root, "gone"), join(d.store.root, "roles.json")]) {
+      if (cwd.endsWith(".json")) await Bun.write(cwd, "{}");
+      await expect(main(["up", "--cwd", cwd], d)).rejects.toThrow(`no directory ${cwd}`);
+    }
+    expect(w.calls).toEqual([]);
+    expect(d.store.roles().lead).toBeUndefined();
   });
 });

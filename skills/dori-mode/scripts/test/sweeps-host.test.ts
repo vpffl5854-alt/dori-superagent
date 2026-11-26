@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acquireSlot, releaseSlot } from "../src/heavy-slot.ts";
-import { guardTick, sampleHost } from "../src/host-guard.ts";
+import { guardTick, sampleHost, sampleLoadMemory } from "../src/host-guard.ts";
 import type { Runner } from "../src/run.ts";
 import { fakeClock, withState } from "./fakes.ts";
 
@@ -58,16 +58,55 @@ test("on Linux the host guard reads free memory from /proc/meminfo when memory_p
   expect(s.memFreePct).toBe(25);
 });
 
+test("free memory is not rounded, so 27.6% does not pass as 28%", async () => {
+  const s = await sampleHost(linuxHost("MemTotal:       10000000 kB\nMemAvailable:    2760000 kB\n"));
+  expect(s.memFreePct).toBeCloseTo(27.6, 5);
+});
+
+test("heavy admission's probe ends on the memory read: no disk, swap or session probe after it", async () => {
+  const calls: string[] = [];
+  const host = linuxHost("MemTotal:       10000000 kB\nMemAvailable:    4000000 kB\n");
+  const s = await sampleLoadMemory(async (argv, opts) => {
+    calls.push(argv.join(" "));
+    return host(argv, opts);
+  });
+  expect(s).toEqual({ load1: 0.5, memFreePct: 40, loadKnown: true, memKnown: true });
+  expect(calls.at(-1)).toBe("cat /proc/meminfo");
+  expect(calls.some((c) => c.startsWith("df") || c.includes("swapusage"))).toBe(false);
+});
+
+test("an unreadable memory value is flagged unknown for admission while the guard keeps its 100% fallback", async () => {
+  const s = await sampleLoadMemory(linuxHost(null));
+  expect(s).toMatchObject({ memFreePct: 100, memKnown: false, loadKnown: true });
+});
+
+test("an empty load output is unknown, not a load of 0", async () => {
+  const base = linuxHost("MemTotal:       10000000 kB\nMemAvailable:    4000000 kB\n");
+  const s = await sampleLoadMemory(async (argv, opts) =>
+    argv[0] === "cat" && argv[1] === "/proc/loadavg" ? { code: 0, out: "", err: "" } : base(argv, opts),
+  );
+  expect(s).toMatchObject({ loadKnown: false, memKnown: true });
+});
+
 test("the host guard keeps memory at 100% when neither memory_pressure nor /proc/meminfo works", async () => {
   expect((await sampleHost(linuxHost(null))).memFreePct).toBe(100);
   expect((await sampleHost(linuxHost("MemTotal:       16000000 kB\n"))).memFreePct).toBe(100);
 });
 
-test("a heavy slot waits for load to drop, and a slot held by a dead process is taken over", async () => {
+const onePolicy = (minSlots: number) => ({ minSlots, maxSlots: 1, maxLoad: 80, jobMemGb: 4, memFreeMinPct: 15 });
+
+test("a heavy slot above the floor waits for load to drop, and a slot held by a dead process is taken over", async () => {
   const dir = join(state.dir, "heavy");
   const clock = fakeClock(T0);
   let loads = [120, 95, 40];
-  const base = { dir, slots: 1, maxLoad: 80, clock, pid: 4242, load: async () => loads.shift() ?? 40 };
+  const base = {
+    dir,
+    policy: onePolicy(0),
+    clock,
+    pid: 4242,
+    log: () => {},
+    host: async () => ({ load1: loads.shift() ?? 40, memFreePct: 80, memTotalGb: 32 }),
+  };
   const slot = await acquireSlot({ ...base, alive: () => true }, "build");
   expect(loads).toEqual([]);
   mkdirSync(dir, { recursive: true });
@@ -106,7 +145,19 @@ test("a slot whose owner is alive is not taken", async () => {
     },
   };
   await expect(
-    acquireSlot({ dir, slots: 1, maxLoad: 80, clock, pid: 7, load: async () => 10, alive: () => true }, "x", 1),
+    acquireSlot(
+      {
+        dir,
+        policy: onePolicy(1),
+        clock,
+        pid: 7,
+        log: () => {},
+        host: async () => ({ load1: 10, memFreePct: 80, memTotalGb: 32 }),
+        alive: () => true,
+      },
+      "x",
+      1,
+    ),
   ).rejects.toThrow("stop");
 });
 

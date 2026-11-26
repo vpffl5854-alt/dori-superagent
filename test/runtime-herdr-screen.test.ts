@@ -19,6 +19,15 @@ describe("omoScreenIdle (#62: herdr reports an omo with live monitors as working
     expect(omoScreenIdle("")).toBe(false);
   });
 
+  test("child-task spinner rows under the box do not count as output below it", () => {
+    const rule = "─".repeat(40);
+    const box = ["done.", "", rule, "❯", rule];
+    const footer = ["~/repo • main", "(OmO) Pursuing goal"];
+    const children = [" ⠇ child one · running", " ⠸ child two · running"];
+    expect(omoScreenIdle([...box, ...children, ...footer].join("\n"))).toBe(true);
+    expect(omoScreenIdle([...box, ...children, ...footer, "more", "output"].join("\n"))).toBe(false);
+  });
+
   test("esc to interrupt anywhere, or an idle box scrolled up above other output, is not idle", async () => {
     const idle = await screen("omo-idle-live-monitors");
     expect(omoScreenIdle("── • Working (9s • esc to interrupt) ──\n" + idle)).toBe(false);

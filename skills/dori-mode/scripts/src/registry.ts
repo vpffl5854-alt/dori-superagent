@@ -55,6 +55,8 @@ export type Lane = {
   readonly reportProtocol?: "jsonl-v1" | undefined;
   readonly budget?: BudgetLimits;
   readonly activityPaths?: readonly string[];
+  /** The question an omo-host lane's footer showed on the last freshness tick, so it is journaled once. */
+  readonly lastQuestion?: string | undefined;
   /** The last supervision failure printed by `freshness`, so the same one is printed once. */
   readonly lastSupervisionError?: string | undefined;
   readonly receipt?: unknown;

@@ -20,15 +20,15 @@ const pidAlive = (pid: number): boolean => {
 };
 
 /** An unreadable lock (a holder that died between create and write) is judged by the file's age. */
-function lockStale(path: string, content: string, now: number): boolean {
+function lockStale(path: string, content: string, now: number, staleMs: number): boolean {
   let lock: { pid?: unknown; host?: unknown; at?: unknown } = {};
   try {
     lock = JSON.parse(content) as typeof lock;
   } catch {
     // fall through to the file's mtime
   }
-  // On this host the pid decides: a live holder keeps its lock however long a herdr call takes, or a second flush
-  // would deliver the same batch again. The age rule is only for locks from another host or locks that can't be read.
+  // On this host the pid decides: a live holder keeps its lock however long an operation takes, or a second holder
+  // would act on state the first is still changing. The age rule is only for locks from another host or locks that can't be read.
   if (lock.host === hostname() && typeof lock.pid === "number") return !pidAlive(lock.pid);
   const at =
     typeof lock.at === "number"
@@ -40,10 +40,11 @@ function lockStale(path: string, content: string, now: number): boolean {
             return now;
           }
         })();
-  return now - at > INBOX_LOCK_STALE_MS;
+  return now - at > staleMs;
 }
 
-export function takeInboxLock(path: string, now: number): (() => void) | undefined {
+/** Creates an exclusive lock and returns its release, or undefined while another live holder has it. */
+export function takeLock(path: string, now: number, staleMs: number): (() => void) | undefined {
   const mine = JSON.stringify({ pid: process.pid, host: hostname(), at: now });
   for (let tries = 0; tries < 2; tries++) {
     try {
@@ -56,7 +57,7 @@ export function takeInboxLock(path: string, now: number): (() => void) | undefin
     }
     const seen = readOrUndefined(path);
     if (seen === undefined) continue;
-    if (!lockStale(path, seen, now)) return undefined;
+    if (!lockStale(path, seen, now, staleMs)) return undefined;
     const aside = `${path}.${process.pid}.stale`;
     try {
       renameSync(path, aside);
@@ -75,4 +76,8 @@ export function takeInboxLock(path: string, now: number): (() => void) | undefin
     rmSync(aside, { force: true });
   }
   return undefined;
+}
+
+export function takeInboxLock(path: string, now: number): (() => void) | undefined {
+  return takeLock(path, now, INBOX_LOCK_STALE_MS);
 }

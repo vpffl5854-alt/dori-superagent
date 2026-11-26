@@ -166,17 +166,21 @@ lead 是唯一和你说话的会话（`prompts/lead.md`）。lane 规则把每�
 
 ### 10、20 和 40 分钟的提醒
 
-一个 10 分钟没有汇报、pane 也不在 working 状态的 lane，会在 pane 里收到 `prompts/nudge.md`，20 分钟时再收到一次，40 分钟时 duty loop 给 lead 发送 `[ESCALATE <key>]`。汇报过 `--status waiting` 或 pane 处于 `blocked` 的 lane 不会被打扰。
+一个 10 分钟没有汇报、pane 也不在 working 状态的 lane，会在 pane 里收到 `prompts/nudge.md`，20 分钟时再收到一次，40 分钟时 duty loop 给 lead 发送 `[ESCALATE <key>]`。汇报过 `--status waiting` 的 lane 不会被打扰。
+
+停在 `blocked` 或 `error` 的 pane 收不到输入，自己永远不会再动：10 分钟后 duty loop 针对这段卡顿给 lead 发送一次 `[STUCK <key>]`，并且不往 pane 里输入任何东西。pane 回到别的状态后，下一次卡顿会再次上报。
 
 ### merge 需要精确 head 上的 CLEAR receipt 和全绿的检查
 
-`dori merge` 用 `gh` 读取 PR 的 head SHA，然后要求 `~/.dori/receipts/` 中有一份针对该 SHA、结论为 `CLEAR` 的 receipt。只有 `dori review` 会写 receipt：它基于 `prompts/review.md` 运行一个全新的非交互式 omo，固定在该 SHA 上；如果 reviewer 没有打印 `VERDICT:` 行，就不写 receipt。
+`dori merge` 用 `gh` 读取 PR 的 head SHA，然后要求 `~/.dori/receipts/` 中有一份针对该 SHA、结论为 `CLEAR` 的 receipt。只有 `dori review` 会写 receipt：它基于 `prompts/review.md` 运行一个全新的非交互式 omo，固定在该 SHA 上；review 在开始前删除该 SHA 之前的 receipt，只在返回 `CLEAR` 或 `BLOCK` 时写入新 receipt。结论是以行首开始的 `VERDICT: CLEAR` 或 `VERDICT: BLOCK` 行（允许行尾附简短理由），或同样内容、整行被 markdown 强调或反引号包裹的行；reviewer 两者都没有打印时，不写 receipt。缩进、项目符号、引用块与围栏示例都不算；纯文本行与强调行相互冲突时不写 receipt。当该 SHA 上的 review 或 merge 正在进行时，`dori merge` 会拒绝，而不会使用旧 receipt。
 
 接着 `gh pr checks` 必须返回至少一个检查，每个检查都必须是 `pass` 或 `skipping`，且至少一个是 `pass`。空的检查列表会被拒绝，理由是 "an empty check list is never green"。review 之后的 push 会改变 head SHA，receipt 就不再匹配，`dori review` 需要重新运行。
 
+fork PR 的 `pull_request` 工作流可能在等待维护者批准，或者启动失败、被取消，而不留下 check run，因此 `gh pr checks` 永远不会列出它，只有 `pass`/`skipping` 的检查列表会把它漏掉。所以 `dori merge` 还会读取精确 head 的 `pull_request` 运行（`gh api repos/<owner>/<repo>/actions/runs?head_sha=<head>&event=pull_request`），只要任一工作流的最新运行没有以 `success`、`skipped` 或 `neutral` 完成就拒绝合并：`MERGE_REFUSED pull_request workflow run(s) not green at head <sha>: ci=action_required`。每个工作流只统计最新的一次运行，因此重新打开 PR 留下的旧 cancelled 或 stale 运行不会阻止合并，其他 head 或其他事件（`push`、`pull_request_target`）的运行也从不阻止合并。如果无法读取运行列表（私有仓库没有 Actions 读取权限、Actions 已关闭、响应被截断或格式错误），则拒绝合并，而不是当作绿。拒绝会说明原因：`Actions status unavailable (permission denied or Actions disabled)`，并且在能够核实工作流状态之前合并一直保持拒绝；正确做法是使用具有 Actions 读取权限的凭据或调整仓库的 Actions 设置，而不是绕过。`--dry-run` 也执行同样的检查。
+
 ### 给你自己工具用的 hook
 
-`$DORI_HOME/config.json` 可以在 `hooks` 下指定 argv 模板：`onReady`、`onReport` 和 `onLost` 在对应事件发生时于后台运行（每个参数中的 `{key}`、`{text}` 和 `{evidence}` 会被填入），`reviewCommand` 可以替换内置的 reviewer，只要它打印同样的 `VERDICT:` 行。`DORI_PROMPTS_DIR` 让 harness 使用你自己的提示词副本。
+`$DORI_HOME/config.json` 可以在 `hooks` 下指定 argv 模板：`onReady`、`onReport` 和 `onLost` 在对应事件发生时于后台运行（每个参数中的 `{key}`、`{text}` 和 `{evidence}` 会被填入），`reviewCommand` 可以替换内置的 reviewer，只要它打印同样的行首 `VERDICT: CLEAR` 或 `VERDICT: BLOCK` 行（允许行尾理由）或仅带强调的整行形式。`DORI_PROMPTS_DIR` 让 harness 使用你自己的提示词副本。
 
 ## 深入 Dori mode
 
@@ -275,7 +279,7 @@ dori 以和 omo 相同的方式发送匿名使用计数：以 OTLP/HTTP JSON 日
 | `dori.lane_ready` | `dori ready` | `evidence_count`, `lane_minutes` |
 | `dori.review_completed` | `dori review` | `verdict`：`CLEAR` 或 `BLOCK` |
 | `dori.merge_decided` | 不带 `--dry-run` 的 `dori merge` | `outcome` |
-| `dori.duty_summary` | 最多每小时一次，来自 duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost` |
+| `dori.duty_summary` | 最多每小时一次，来自 duty loop | `ticks`, `flushed`, `nudges`, `escalations`, `lost`, `stuck` |
 
 每条记录还带有服务名称和版本、安装哈希、一个 CI 标志、操作系统类型和版本，以及 CPU 架构。从不发送：路径、仓库名、PR 编号、lane key、brief、消息或任何其他文本。命令最多等待发送 2 秒，遥测失败从不会让命令失败。
 

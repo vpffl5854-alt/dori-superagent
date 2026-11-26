@@ -1,0 +1,16 @@
+name: CLA Request
+
+# A pull request from a fork runs this file from the pull request itself, so it holds nothing worth taking: no token
+# permissions, no secrets, no checkout. Its only job is to finish. That completion starts "CLA Assistant" (cla.yml)
+# from the default branch through workflow_run, which is where the comment, the status and the signature are written.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CLA check requested. The result is the 'cla' commit status on this pull request."

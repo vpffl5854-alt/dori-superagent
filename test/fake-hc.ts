@@ -36,6 +36,8 @@ export type FakeKnobs = {
   readError?: string;
   /** omo misses hc's Enter: a sent text stays in the input box until this many more Enter presses (a large number: never). */
   enterMisses?: number;
+  /** What `ps` prints (the OS process table); unset, `ps` fails. */
+  ps?: string;
 };
 
 /** omo's screen with `draft` in its input box between the two rules. */
@@ -58,6 +60,7 @@ const EXIT: Readonly<Record<string, number>> = {
 };
 
 const ok = (value: unknown): ExecResult => ({ code: 0, stdout: `${JSON.stringify(value)}\n`, stderr: "" });
+const printed = (stdout: string): ExecResult => ({ code: 0, stdout, stderr: "" });
 const fail = (kind: string, message: string): ExecResult => ({
   code: EXIT[kind] ?? 1,
   stdout: "",
@@ -94,6 +97,8 @@ export class FakeHc {
   }
 
   readonly exec: Exec = async (cmd, argv) => {
+    if (cmd === "ps")
+      return this.knobs.ps === undefined ? { code: 1, stdout: "", stderr: "ps: no table\n" } : printed(this.knobs.ps);
     if (cmd !== "hc" || argv[0] !== "--json") throw new Error(`unexpected call ${cmd} ${argv.join(" ")}`);
     const args = argv.slice(1);
     this.calls.push(args);

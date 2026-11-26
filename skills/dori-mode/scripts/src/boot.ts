@@ -80,6 +80,8 @@ export const bootCheck = async (deps: BootDeps): Promise<{ exitCode: number; lin
     failed = true;
     lines.push(`RUNTIME unavailable: ${rts.failure?.message ?? "no runtime chosen"}`);
   }
+  if (deps.config.laneRuntime) lines.push(`LANE_RUNTIME ${deps.config.laneRuntime} (from config)`);
+  if (deps.config.leadRuntime) lines.push(`LEAD_RUNTIME ${deps.config.leadRuntime} (from config)`);
   const lanes: BootLane[] = [];
   const journals: string[] = [];
   // An unreadable lane file, or a lanes path that cannot be listed, is named; the other lanes and checks still run.

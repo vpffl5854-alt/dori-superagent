@@ -28,6 +28,20 @@ export type Progress = {
 
 export class ReportError extends Error {}
 
+// An omo-host lane's screen ends with the footer render.ts draws: its open questions as `? <title> [options]` lines
+// directly above the status line (`Working (`, `Running (` or the bare prompt). A `? ` line anywhere else is transcript.
+const STATUS_LINE = /^(?:(?:Working|Running) \(|❯\s*$)/;
+export const footerQuestion = (screen: string): string | undefined => {
+  const rows = Bun.stripANSI(screen).split("\n");
+  const asked: string[] = [];
+  for (let i = rows.findLastIndex((row) => STATUS_LINE.test(row)) - 1; i >= 0; i--) {
+    const row = rows[i] ?? "";
+    if (!row.startsWith("? ")) break;
+    asked.unshift(row.slice(2));
+  }
+  return asked.length ? asked.join("\n") : undefined;
+};
+
 export const isReportKind = (value: unknown): value is ReportKind =>
   value === "milestone" || value === "blocker" || value === "question" || value === "halted" || value === "done";
 
@@ -131,6 +145,18 @@ export class Reports {
     const report: Report = { type: "report", key, kind, text: text.trim(), at: new Date(now).toISOString() };
     this.append(report);
     return report;
+  }
+
+  // The question a lane's footer shows, journaled once as a question report (blocked: never nudged or called stalled)
+  // while it differs from the one last seen; the caller stores the returned text as the lane's lastQuestion.
+  question(
+    lane: { readonly key: string; readonly lastQuestion?: string | undefined },
+    screen: string,
+    now: number,
+  ): string | undefined {
+    const asked = footerQuestion(screen);
+    if (asked !== undefined && asked !== lane.lastQuestion) this.report(lane.key, "question", asked, now);
+    return asked;
   }
 
   observe(key: string, screen: string, now: number, staleAfterMs: number, resumeOnWorking = true): Progress | null {

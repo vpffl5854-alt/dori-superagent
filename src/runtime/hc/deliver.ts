@@ -81,16 +81,23 @@ export async function deliver(
   if (before.status === "gone" || before.shellInFront) return { kind: "no-agent" };
   if (!force && (before.status === "blocked" || before.status === "error"))
     return { kind: "not-ready", status: before.status };
-  // A terminal that has never reported (status null, no shell in front: an editor, a program without OSC 7501) gets
-  // nothing typed into it whatever `when` says: its state is unknown, so the message stays queued.
+  // A terminal that has never reported a usable word (status null: an editor, a program without OSC 7501) used to get
+  // nothing typed into it, whatever `when` says. The probe now classifies such a terminal off its screen (omo's
+  // markers), so `unknown` here means the screen gave no verdict either and the message stays queued.
   if (before.status === "unknown") return { kind: "not-ready", status: "unknown" };
   // `done` is the program's own "turn finished, waiting": typing is what it waits for, and `--if` takes only idle|working.
   // Idle read off the screen while hc's own word is still `working` (#178): gate on that word, so hc refuses (and the
   // message stays queued) if omo moves to blocked or idle in between. omo reports `working` for a turn too, so a turn
   // that starts in the one round trip between the screen read and this send still passes.
+  // A terminal hc never heard a status word from has nothing for `--if` to compare: the screen classification is the
+  // gate, the same trust the herdr runtime places in its scrape — so `when` is matched against it here instead.
+  const unreported = probed.word === "unknown";
+  if (unreported && when !== "any" && before.status !== when) return { kind: "not-ready", status: before.status };
   const screenIdle = when === "idle" && before.status === "idle" && probed.word === "working";
   const gate =
-    when === "any" || (when === "idle" && before.status === "done") ? [] : ["--if", screenIdle ? "working" : when];
+    when === "any" || unreported || (when === "idle" && before.status === "done")
+      ? []
+      : ["--if", screenIdle ? "working" : when];
   const argv = ["send", id, ...gate, ...(force ? ["--force"] : []), "--", text];
   let result: Record<string, unknown>;
   try {

@@ -112,11 +112,19 @@ test("hook templates fill each argument separately, so text with spaces or quote
 });
 
 test("backupModels defaults to none and a non-string entry is refused", async () => {
-  const { loadConfig, ConfigError } = await import("../src/config.ts");
-  const dir = (await import("node:fs")).mkdtempSync(`${(await import("node:os")).tmpdir()}/dori-er-`);
-  const path = `${dir}/config.json`;
+  const path = join(state.dir, "config.json");
   await Bun.write(path, "{}");
-  expect((await loadConfig(path, dir)).backupModels).toEqual([]);
+  expect((await loadConfig(path, "/home/ana")).backupModels).toEqual([]);
   await Bun.write(path, JSON.stringify({ backupModels: ["a", 1] }));
-  await expect(loadConfig(path, dir)).rejects.toBeInstanceOf(ConfigError);
+  await expect(loadConfig(path, "/home/ana")).rejects.toBeInstanceOf(ConfigError);
+});
+
+test("the old heavySlots key is read as the heavy ceiling, and heavyMaxSlots wins when both are set", async () => {
+  const path = join(state.dir, "config.json");
+  await Bun.write(path, JSON.stringify({ heavySlots: 3 }));
+  expect(await loadConfig(path, "/home/ana")).toMatchObject({ heavyMinSlots: 1, heavyMaxSlots: 3, heavyJobMemGb: 4 });
+  await Bun.write(path, JSON.stringify({ heavySlots: 3, heavyMaxSlots: 5 }));
+  expect((await loadConfig(path, "/home/ana")).heavyMaxSlots).toBe(5);
+  await Bun.write(path, JSON.stringify({ heavySlots: 1, heavyMinSlots: 2 }));
+  await expect(loadConfig(path, "/home/ana")).rejects.toThrow("invalid heavyMinSlots");
 });

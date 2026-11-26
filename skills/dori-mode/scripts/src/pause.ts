@@ -1,4 +1,4 @@
-import type { SessionRef } from "../../../../src/runtime/types.ts";
+import { AGENT_SESSION_KINDS, type SessionRef } from "../../../../src/runtime/types.ts";
 import type { FlowDeps } from "./done-flow.ts";
 import { runtimesOf } from "./run.ts";
 import { readScreen, sendVerified, statusLookup } from "./sessions.ts";
@@ -21,18 +21,29 @@ const READ_BACK_TRIES = 8;
 
 const count = (screen: string, shown: RegExp): number => screen.match(shown)?.length ?? 0;
 
-/** Sends a goal command and confirms it from the screen: one more matching line than before it was sent. */
+/**
+ * Sends a goal command and confirms it from the screen: one more matching line than before it was sent. An agent
+ * session (omo-host) prints the command's answer to no screen, so its goal status is read from the agent instead:
+ * `wanted`, or `none` (no goal, which the screen shows as "no goal exists").
+ */
 const goalCommand = async (
   deps: FlowDeps,
   ref: SessionRef,
   text: string,
   shown: RegExp,
+  wanted: string,
 ): Promise<"confirmed" | "unconfirmed" | "failed"> => {
   const rts = runtimesOf(deps);
-  const before = count(await readScreen(rts, ref, 200), shown);
+  const fromAgent = AGENT_SESSION_KINDS.has(ref.runtime);
+  const before = fromAgent ? 0 : count(await readScreen(rts, ref, 200), shown);
+  const done = async (): Promise<boolean> => {
+    if (!fromAgent) return count(await readScreen(rts, ref, 200), shown) > before;
+    const goal = (await rts.for(ref).probe(ref)).goal;
+    return goal === wanted || goal === "none";
+  };
   if ((await sendVerified(rts, deps.clock, ref, text)) === "failed") return "failed";
   for (let attempt = 0; attempt < READ_BACK_TRIES; attempt++) {
-    if (count(await readScreen(rts, ref, 200), shown) > before) return "confirmed";
+    if (await done()) return "confirmed";
     await deps.clock.sleep(700);
   }
   return "unconfirmed";
@@ -50,7 +61,7 @@ export const pauseLane = async (deps: FlowDeps, lane: Lane, note: string): Promi
   if (!ref) return { lane, lines: [`PAUSE_UNVERIFIED ${lane.key} has no pane, so its goal cannot be paused`], code: 3 };
   // The goal first: stopping the running turn must not hand off to a goal continuation. sendVerified delivers it under
   // the status it reads, so a working agent gets it as queued input ("working"), an idle one under "idle".
-  const goal = await goalCommand(deps, ref, "/goal pause", PAUSED_SHOWN);
+  const goal = await goalCommand(deps, ref, "/goal pause", PAUSED_SHOWN, "paused");
   if (goal !== "confirmed")
     return { lane, lines: [`PAUSE_UNVERIFIED ${lane.key} /goal pause ${goal}; lane left ${status}`], code: 3 };
   const at = new Date(deps.clock.now()).toISOString();
@@ -76,7 +87,7 @@ export const resumeLane = async (deps: FlowDeps, lane: Lane, note: string): Prom
   const ref = sessionOf(lane);
   if (!ref)
     return { lane, lines: [`RESUME_UNVERIFIED ${lane.key} has no pane, so its goal cannot be resumed`], code: 3 };
-  const goal = await goalCommand(deps, ref, "/goal resume", RESUMED_SHOWN);
+  const goal = await goalCommand(deps, ref, "/goal resume", RESUMED_SHOWN, "active");
   if (goal !== "confirmed")
     return { lane, lines: [`RESUME_UNVERIFIED ${lane.key} /goal resume ${goal}; lane left paused`], code: 3 };
   const now = deps.clock.now();
