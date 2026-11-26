@@ -95,6 +95,8 @@ export const prompt = (
   history: readonly Turn[],
   /** The app's window titles, the shown one first, when it has several. */
   windowTitles: readonly string[] = [],
+  /** What earlier tasks in this app learned the hard way (mac-learn.ts). */
+  learned: readonly string[] = [],
 ): string =>
   [
     "You operate a Mac for the owner, in the background, one action at a time.",
@@ -106,9 +108,11 @@ export const prompt = (
       ? [`Windows of "${app}": ${windowTitles.map((t, i) => `"${t}"${i === 0 ? " (shown below)" : ""}`).join(", ")}`]
       : []),
     app
-      ? [...tipsFor(app), `Controls of "${app}" (role "name" [ref] : value):\n${snapshot.slice(0, SNAPSHOT_MAX)}`].join(
-          "\n",
-        )
+      ? [
+          ...tipsFor(app),
+          ...learned.map((t) => `Learned before in this app: ${t}`),
+          `Controls of "${app}" (role "name" [ref] : value):\n${snapshot.slice(0, SNAPSHOT_MAX)}`,
+        ].join("\n")
       : "No app looked at yet.",
     ...(app && menus
       ? [`Menu bar of "${app}" (menu > item (shortcut), [x] = disabled):\n${menus.slice(0, MENUS_MAX)}`]

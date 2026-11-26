@@ -12,6 +12,7 @@ import { upstreamCommands } from "./cli-upstream.ts";
 import { briefingCommands } from "./cli-briefing.ts";
 import { dorichatCommands } from "./cli-dorichat.ts";
 import { decisionsCommands } from "./cli-decisions.ts";
+import { fixerCommands } from "./cli-fixer.ts";
 import { macCommands } from "./cli-mac.ts";
 import { notifyCommands } from "./cli-notify.ts";
 import { routeCommands } from "./cli-route.ts";
@@ -95,6 +96,9 @@ const USAGE = `dori <command> [options]
   mac stop | resume                    the stop switch (도리방 "멈춰" / "재개"); the chord ctrl+alt+shift+escape stops too
   mac selftest [--report] | serve      6×7 on Calculator; serve is the 맥손 tab (queue + daily self-test)
   dorichat                             도리방 listener: approval button presses and the owner's text -> lead inbox
+  fixer [--dry-run] | fixer pending | fixer go|drop <key>
+                                       nightly: open one lane for a fault of Dori's own (or a hunted issue); the morning
+                                       briefing asks the owner by button (합치기 / PR 올리기 / 버리기)
   briefing [--no-send]                 morning briefing (finished/working/lost lanes, faults, shorts, approvals, cost) to Telegram
   upstream [--report] | apply <branch>  merge the original repo in a throwaway worktree + CI; apply fast-forwards live after a yes
   incidents [--report]                 repeating faults in Dori's own logs; --report files issue + backlog + tells owner
@@ -179,6 +183,7 @@ const commands: Readonly<Record<string, Command>> = {
   ...decisionsCommands,
   ...notifyCommands,
   ...macCommands,
+  ...fixerCommands,
 };
 const handler = Object.hasOwn(commands, command) ? commands[command] : undefined;
 

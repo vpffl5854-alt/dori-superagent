@@ -31,6 +31,9 @@ export type GoalDeps = RunOpts & {
   /** The name the Mac shows for an app the model named in English or Korean ("TextEdit" -> "텍스트 편집기"). */
   readonly appName?: (app: string) => Promise<string>;
   readonly autoSend?: boolean;
+  /** The tips learned for an app, and how one is learned after a task that failed one way and worked another. */
+  readonly tips?: (app: string) => readonly string[];
+  readonly learnTip?: (app: string, turns: readonly Turn[]) => Promise<void>;
 };
 
 export type GoalResult = {
@@ -59,6 +62,8 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
   const history: Turn[] = [];
   const steps: { app: string; step: string }[] = [];
   const typed: string[] = [];
+  /** The app of the last action that failed: a task that ends well after it has a way worth remembering there. */
+  let missed: string | undefined;
   let replayable = true;
   let fails = 0;
   let app: string | undefined;
@@ -77,6 +82,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
     ((await e.call("ax.snapshot", { target: id, opts: { all: true, maxNodes: 3000 } })).result as { text?: string })
       ?.text ?? "";
   const finish = async (ok: boolean, text: string, held = false): Promise<GoalResult> => {
+    if (ok && missed && d.learnTip) await d.learnTip(missed, history).catch(() => undefined);
     const w = app ? findWindow(await windows(), app, title) : undefined;
     const after = d.photos && w ? await photo(e, w.id) : undefined;
     const apps = new Set(steps.map((s) => s.app));
@@ -142,6 +148,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
       plan,
       history,
       w ? [w.title, ...titles.filter((t) => t !== w.title)] : [],
+      w ? (d.tips?.(w.app) ?? []) : [],
     );
     const thought = await d.think(tier, q);
     const dec = "text" in thought ? parseDecision(thought.text) : undefined;
@@ -171,6 +178,7 @@ export const runGoal = async (e: Engine, goal: string, d: GoalDeps): Promise<Goa
     // Only what worked is learned: a failed step in the recipe would fail every replay.
     if (r.ok && r.step) steps.push({ app: act.app, step: r.step });
     if (r.ok && (act.do === "type" || (act.do === "press" && !r.step))) replayable = false;
+    if (!r.ok) missed = act.app;
     if (!r.ok && failed() === "out") return finish(false, `더 못 하겠어요: ${r.result}`);
   }
   return finish(false, `${MAX_TURNS}번 해도 끝나지 않아서 멈췄어요`);

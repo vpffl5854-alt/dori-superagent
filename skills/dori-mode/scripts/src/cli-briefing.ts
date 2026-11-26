@@ -12,6 +12,8 @@ import {
 } from "./briefing.ts";
 import type { Command } from "./cli-context.ts";
 import { sendApprovals } from "./cli-dorichat.ts";
+import { pendingFixes, sendFixes } from "./cli-fixer-decide.ts";
+import { fixLine } from "./fixer.ts";
 import { clearQueue, readQueue } from "./cli-notify.ts";
 import { sessionCalls } from "./cli-route.ts";
 import { fill } from "./config.ts";
@@ -159,6 +161,7 @@ const briefing: Command = async ({ values, config }) => {
     shorts: shorts(config.stateDir, since),
     alerts: readQueue(config).map((q) => `${q.source}: ${q.text}`),
     approvals: open.map((o) => (o.decision ? `${o.title}: ${o.decision}` : o.title)),
+    fixes: pendingFixes(config).map((p) => fixLine(p.key, p.result)),
     ...(() => {
       const c = monthCost(config.sessionsDir, now);
       return c ? { cost: c } : {};
@@ -193,6 +196,11 @@ const briefing: Command = async ({ values, config }) => {
     return false;
   });
   if (buttons) console.log(`BRIEFING_BUTTONS ${open.length}`);
+  const fixes = await sendFixes(config).catch((e) => {
+    console.log(`BRIEFING_FIXES_FAILED ${String(e).slice(0, 200)}`);
+    return 0;
+  });
+  if (fixes) console.log(`BRIEFING_FIXES ${fixes}`);
 };
 
 export const briefingCommands: Readonly<Record<string, Command>> = { briefing };

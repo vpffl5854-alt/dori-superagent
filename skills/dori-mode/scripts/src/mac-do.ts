@@ -12,6 +12,7 @@ import { findWindow, type MacTask, type Win } from "./mac.ts";
 import { enginePath, openEngine } from "./mac-engine.ts";
 import { type GoalResult, runGoal } from "./mac-goal.ts";
 import { hidIdleMs, isStopped, macConfig, macDir, submit } from "./mac-jobs.ts";
+import { addTip, appendHistory, parseTip, tipPrompt, tipsOf } from "./mac-learn.ts";
 import { explainPrompt, parseQuick, type Quick, volumeScript } from "./mac-quick.ts";
 import { runTask } from "./mac-run.ts";
 import { ask, type ThinkConfig } from "./mac-think.ts";
@@ -138,6 +139,14 @@ export const doGoal = async (config: DoriConfig, goal: string): Promise<GoalResu
       openApp: async (app, url) => void (await openApp(app, true, url)),
       appName: shownAppName,
       autoSend: c.autoSend ?? false,
+      tips: (app) => tipsOf(macDir(config), app),
+      learnTip: async (app, turns) => {
+        const t = await ask("deepseek", c.think ?? {}, tipPrompt(goal, app, turns), run, macDir(config));
+        const tip = "text" in t ? parseTip(t.text) : undefined;
+        if (!tip) return;
+        addTip(macDir(config), app, tip);
+        console.log(`MAC_TIP ${app}: ${tip}`);
+      },
       hold: async (task) => void (await submit(config, task, true)),
     });
     if (g.ok && g.recipe)
@@ -173,6 +182,15 @@ export const doAndReport = async (config: DoriConfig, id: string, goal: string, 
   }
   const g = await doGoal(config, goal);
   const text = goalReport(goal, g);
+  appendHistory(macDir(config), {
+    at: new Date().toISOString(),
+    id,
+    goal,
+    ok: g.ok,
+    held: g.held,
+    text: g.text,
+    turns: g.history,
+  });
   console.log(`MAC_DO ${id} ok=${g.ok} tiers=${g.tiers.join(">") || "recipe"}\n${text}`);
   if (bot && chatId) {
     if (g.before) await bot.tg.sendPhoto({ chatId }, g.before, "before.png", "하기 전");

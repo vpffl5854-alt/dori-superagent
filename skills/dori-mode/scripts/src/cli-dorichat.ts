@@ -20,6 +20,8 @@ import { parseConsentPress, recordDecision } from "./mac-consent.ts";
 import { decidePending, enqueue, newId, stopPath } from "./mac-jobs.ts";
 import { type DorichatConfig, dorichatBot } from "./dorichat-bot.ts";
 import type { Telegram } from "./messenger/telegram.ts";
+import { decideFix } from "./cli-fixer-decide.ts";
+import { parseFixPress } from "./fixer.ts";
 import { run } from "./run.ts";
 
 type Update = {
@@ -91,6 +93,22 @@ const handle = async (config: DoriConfig, tg: Telegram, cfg: DorichatConfig, u: 
           reply_markup: { inline_keyboard: [] },
         });
       return void console.log(`DORICHAT_CONSENT ${cp.id} ${cp.n} ok=${ok}`);
+    }
+    const fp = parseFixPress(cq.data);
+    if (fp) {
+      await tg.call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: fp.action === "go" ? "처리 중이에요" : "정리할게요",
+      });
+      const r = await decideFix(config, fp.key, fp.action === "go");
+      if (r.done && cq.message)
+        await tg.call("editMessageReplyMarkup", {
+          chat_id: cq.message.chat.id,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+      console.log(`DORICHAT_FIX ${fp.action} ${fp.key} done=${r.done}`);
+      return void (await tg.send({ chatId: cq.message?.chat.id ?? cfg.chatId ?? 0 }, r.line));
     }
     const mp = parseMacPress(cq.data);
     if (mp) {

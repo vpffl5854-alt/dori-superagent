@@ -13,6 +13,8 @@ export type Briefing = {
   readonly faults: readonly string[];
   readonly shorts: readonly string[];
   readonly approvals: readonly string[];
+  /** The nightly fixer's results waiting for the owner's button (cli-fixer.ts). */
+  readonly fixes?: readonly string[];
   /** Alerts that could wait (`dori notify --level later`), since the last briefing. */
   readonly alerts?: readonly string[];
   readonly cost?: { readonly month: string; readonly total: number; readonly calls: number; readonly unknown: number };
@@ -56,6 +58,7 @@ export const renderBriefing = (b: Briefing): string => {
     ...section("멈춘 레인", b.lost.map(lane)),
     ...section("문제", b.faults),
     ...section("쇼츠", b.shorts),
+    ...section("어젯밤 고친 것", b.fixes ?? []),
     ...section("승인 기다리는 것", b.approvals),
     ...section("알림", b.alerts ?? []),
   ];
