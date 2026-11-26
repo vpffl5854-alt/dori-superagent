@@ -45,6 +45,12 @@ export const sigOf = (text: string): string =>
     .trim()
     .slice(0, 120);
 
+/** The other issue or PR numbers an issue's comments mention, the issue's own left out, at most five. */
+export const mentionedNumbers = (comments: readonly { body?: string }[], own: string): string[] =>
+  [...new Set(comments.flatMap((c) => [...(c.body ?? "").matchAll(/#(\d{2,7})\b/g)].map((m) => m[1] ?? "")))]
+    .filter((n) => n && n !== own)
+    .slice(0, 5);
+
 /** The most frequent fault not tried within COOL_DAYS. */
 export const pickCandidate = (
   cands: readonly Candidate[],

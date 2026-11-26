@@ -16,6 +16,7 @@ import {
   pickCandidate,
   selfBrief,
   selfKey,
+  mentionedNumbers,
   sigOf,
 } from "./fixer.ts";
 import { cfgOf, harnessOf, readJson, resultPath } from "./fixer-places.ts";
@@ -62,7 +63,16 @@ const openFixLane = (home: string): string | undefined =>
     .map((f) => readJson<{ key?: string; status?: string }>(join(home, "lanes", f)))
     .find((l) => l?.status === "working" || l?.status === "waiting")?.key;
 
-/** The newest hunt brief whose issue is still open and that no fix lane has had. */
+/** An open pull request among the numbers the issue's comments mention ("Fix in progress: #47648"). */
+const openPrIn = async (repo: string, numbers: readonly string[]): Promise<string | undefined> => {
+  for (const n of numbers) {
+    const r = await run(["gh", "pr", "view", n, "-R", repo, "--json", "state", "-q", ".state"]);
+    if (r.code === 0 && r.out.trim() === "OPEN") return n;
+  }
+  return undefined;
+};
+
+/** The newest hunt brief whose issue is still open, not claimed by an open PR, and that no fix lane has had. */
 const huntPick = async (c: ReturnType<typeof cfgOf>, tried: Record<string, string>, stateDir: string) => {
   const dir = join(stateDir, "hunt");
   const briefs = (existsSync(dir) ? readdirSync(dir) : [])
@@ -75,8 +85,16 @@ const huntPick = async (c: ReturnType<typeof cfgOf>, tried: Record<string, strin
     const text = readFileSync(path, "utf8");
     const m = /github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)/.exec(text);
     if (!m?.[1] || !m[2]) continue;
-    const s = await run(["gh", "issue", "view", m[2], "-R", m[1], "--json", "state", "-q", ".state"]);
-    if (s.code === 0 && s.out.trim() === "OPEN") return { key, text, repo: m[1], number: m[2] };
+    const s = await run(["gh", "issue", "view", m[2], "-R", m[1], "--json", "state,comments"]);
+    if (s.code !== 0) continue;
+    const issue = JSON.parse(s.out) as { state?: string; comments?: { body?: string }[] };
+    if (issue.state !== "OPEN") continue;
+    const claimedBy = await openPrIn(m[1], mentionedNumbers(issue.comments ?? [], m[2]));
+    if (claimedBy) {
+      console.log(`FIXER_SKIP ${key} already claimed by open PR #${claimedBy}`);
+      continue;
+    }
+    return { key, text, repo: m[1], number: m[2] };
   }
   return undefined;
 };

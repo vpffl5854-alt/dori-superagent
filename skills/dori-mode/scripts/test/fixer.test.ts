@@ -6,6 +6,7 @@ import {
   fixButtons,
   huntFixBrief,
   huntFixKey,
+  mentionedNumbers,
   parseFixPress,
   parseResult,
   pickCandidate,
@@ -104,4 +105,14 @@ test("buttons: 합치기 or PR 올리기 with 버리기, and only 확인 when no
   expect(parseFixPress("fx:go:fix-self-20261127")).toEqual({ action: "go", key: "fix-self-20261127" });
   expect(parseFixPress("fx:go:../etc")).toBeUndefined();
   expect(parseFixPress("bl:go:x")).toBeUndefined();
+});
+
+test("the numbers an issue's comments mention, not its own, are where a claiming PR is looked for", () => {
+  expect(
+    mentionedNumbers(
+      [{ body: "Fix in progress: #47648 removes that check" }, { body: "dup of #49082, see #47648" }],
+      "49082",
+    ),
+  ).toEqual(["47648"]);
+  expect(mentionedNumbers([{}], "1")).toEqual([]);
 });
