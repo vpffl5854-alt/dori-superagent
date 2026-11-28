@@ -93,12 +93,12 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       const picked: string[] = [];
       // Models are asked directly (omo-provider.ts): `omo -p` starts a whole agent, and this slot timed out on it (exit 124).
       if (titles.length > 0) {
-        const out = await askRef(
+        const r = await askRef(
           cfg.scriptModel ?? config.defaultModel,
           trendPrompt(titles, cfg.interests ?? []),
           TREND_MODEL_MS,
         );
-        for (const word of parseHeadwords(out).sort(() => Math.random() - 0.5)) {
+        for (const word of parseHeadwords("text" in r ? r.text : "").sort(() => Math.random() - 0.5)) {
           if (picked.length >= 2) break;
           const page = await wikiPage(fetchHttp, word).catch(() => null);
           if (page && page.extract.length >= MIN_EXTRACT && !picked.includes(page.title)) picked.push(page.title);
@@ -132,9 +132,11 @@ const shorts: Command = async ({ positionals, opt, values, config }) => {
       const prompt = scriptPrompt(await wikiPage(fetchHttp, title));
       let last = "";
       for (let attempt = 0; attempt < 2; attempt++) {
-        const answer = await askRef(cfg.scriptModel ?? config.defaultModel, prompt, 180_000);
+        // 32k, like the briefing: a reasoning model thinks first, and a 16k allowance was spent thinking entirely.
+        const r = await askRef(cfg.scriptModel ?? config.defaultModel, prompt, 180_000, 32_000);
         try {
-          const json = extractJson(answer);
+          if ("error" in r) throw new ShortsError(r.error);
+          const json = extractJson(r.text);
           parseScript(json);
           return void writeFileSync(out, json);
         } catch (e) {

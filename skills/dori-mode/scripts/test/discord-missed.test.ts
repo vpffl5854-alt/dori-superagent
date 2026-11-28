@@ -18,14 +18,19 @@ const msg = (id: string, author: string, text: string, channel = "c1"): Inbound 
 
 test("missed messages are gathered per channel and shown once, after the backfill goes quiet", async () => {
   const shown: string[][] = [];
-  const m = missedTalk((talk) => shown.push(talk.map((t) => t.messageId)), 20);
+  const waiters: (() => void)[] = [];
+  const m = missedTalk((talk) => {
+    shown.push(talk.map((t) => t.messageId));
+    waiters.shift()?.();
+  }, 20);
+  const nextShow = () => new Promise<void>((resolve) => waiters.push(resolve));
+  const both = Promise.all([nextShow(), nextShow()]);
   m.add(msg("1", "상디", "a"));
   m.add(msg("2", "sseritwo_51107", "b"));
   m.add(msg("9", "초파", "x", "c2"));
-  await Bun.sleep(5);
   m.add(msg("3", "instinct", "c"));
   expect(shown).toEqual([]);
-  await Bun.sleep(60);
+  await both;
   expect(shown.sort()).toEqual([["1", "2", "3"], ["9"]]);
 });
 
